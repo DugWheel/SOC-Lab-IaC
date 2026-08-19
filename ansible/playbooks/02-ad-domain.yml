@@ -1,0 +1,54 @@
+---
+- name: Promote Windows Server to Domain Controller
+  hosts: ad_server
+  gather_facts: true
+  vars:
+     domain_name: "soclab.local"
+     netbios_name: "SOCLAB"
+     safe_mode_password: "SafeModeP@ss123!"
+  tasks:
+    - name: Install AD-Domain-Services feature
+      win_feature:
+        name: AD-Domain-Services
+        include_management_tools: true
+        include_sub_features: true
+        state: present
+      register: adds_install
+      async: 600
+      poll: 15
+
+    - name: Reboot if required after feature install
+      win_reboot:
+      when: adds_install.reboot_required
+
+    - name: Promote server to Domain Controller (new forest)
+      microsoft.ad.domain:
+        dns_domain_name: "{{ domain_name }}"
+        safe_mode_password: "{{ safe_mode_password }}"
+      register: domain_promo
+      async: 600
+      poll: 15
+
+    - name: Reboot after promotion
+      win_reboot:
+        reboot_timeout: 900
+      when: domain_promo.reboot_required
+
+    - name: Wait for domain to be fully up after reboot
+      win_wait_for:
+        port: 389
+        timeout: 300
+
+    - name: Configure DNS Forwarder on Domain Controller
+      win_shell: |
+        Set-DnsServerForwarder -IPAddress 192.168.10.1 -PassThru
+
+    - name: Create a test domain admin account (optional, for lab)
+      microsoft.ad.user:
+        name: labadmin
+        password: "S0cL@bPassword2026!"
+        state: present
+        password_never_expires: true
+        groups:
+          add:
+            - Domain Admins

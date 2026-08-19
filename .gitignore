@@ -1,0 +1,4 @@
+vms/
+packer/*/iso/*.iso
+packer/*/iso/*.gz
+.env

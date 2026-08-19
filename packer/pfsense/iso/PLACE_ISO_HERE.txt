@@ -1,0 +1,5 @@
+Netgate Installer dosyasini buraya koy (gunzip'lenmis .iso hali).
+Indirdigin dosya: netgate-installer-v1.2-RELEASE-amd64.iso.gz
+Once ac:  gunzip netgate-installer-v1.2-RELEASE-amd64.iso.gz
+Sonucta olusan .iso dosyasini bu klasore koy, pfsense.pkr.hcl'deki
+iso_url default'u ile dosya adinin eslestigini kontrol et.

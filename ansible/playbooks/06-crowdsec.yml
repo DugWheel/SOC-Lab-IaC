@@ -1,0 +1,70 @@
+---
+- name: Install and configure CrowdSec on Windows hosts
+  hosts: ad_server:workstation
+  vars:
+    crowdsec_msi_path: "C:\\Tools\\crowdsec.msi"
+
+  tasks:
+    - name: Ensure Tools dir exists
+      win_file:
+        path: C:\Tools
+        state: directory
+
+    - name: Download CrowdSec MSI dynamically via GitHub API
+      win_shell: |
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $ProgressPreference = 'SilentlyContinue'
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/crowdsecurity/crowdsec/releases/latest" -UseBasicParsing
+        $msi = $release.assets | Where-Object { $_.name -match '\.msi$' } | Select-Object -First 1
+        if (-not $msi) { throw "CrowdSec MSI release not found!" }
+        Invoke-WebRequest -Uri $msi.browser_download_url -OutFile "C:\Tools\crowdsec.msi" -UseBasicParsing
+      args:
+        creates: C:\Tools\crowdsec.msi
+
+    - name: Install CrowdSec silently
+      win_package:
+        path: "{{ crowdsec_msi_path }}"
+        arguments: "/quiet /norestart"
+        state: present
+      async: 600
+      poll: 15
+
+    - name: Update CrowdSec Hub (Repairs missing index.json file)
+      win_shell: .\cscli.exe hub update
+      args:
+        chdir: "C:\\Program Files\\CrowdSec"
+
+    - name: Install windows-firewall collection
+      win_shell: .\cscli.exe collections install crowdsecurity/windows-firewall
+      args:
+        chdir: "C:\\Program Files\\CrowdSec"
+
+    - name: Ensure acquis.yaml is configured for Windows Event Logs
+      win_copy:
+        dest: "C:\\ProgramData\\CrowdSec\\config\\acquis.yaml"
+        content: |
+          source: wineventlog
+          event_channel: Security
+          event_level: Information
+          event_ids:
+            - 4624
+            - 4625
+          labels:
+            type: windows
+          ---
+          source: wineventlog
+          event_channel: Microsoft-Windows-Windows Firewall With Advanced Security/Firewall
+          event_level: Information
+          labels:
+            type: windows_firewall
+      notify: restart crowdsec windows service
+      # NOT: windows-firewall collection'ini kullanmak icin bu ikinci kaynak
+      # gerekliydi - onceki halinde sadece Security 4624/4625 okunuyordu,
+      # kurulu diger collection'lar (iis, mssql, http-*) icin de kendi log
+      # kaynaklarini eklemen gerekir, aksi halde kurulu olup veri almazlar.
+
+  handlers:
+    - name: restart crowdsec windows service
+      win_service:
+        name: crowdsec
+        state: restarted

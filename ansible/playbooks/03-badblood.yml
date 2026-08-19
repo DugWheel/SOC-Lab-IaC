@@ -1,0 +1,56 @@
+---
+- name: Populate AD with BadBlood
+  hosts: ad_server
+  vars:
+    domain_name: "soclab.local"
+
+  tasks:
+    - name: Download BadBlood ZIP to local machine
+      delegate_to: localhost
+      get_url:
+        url: "https://github.com/davidprowe/BadBlood/archive/refs/heads/master.zip"
+        dest: "/tmp/BadBlood.zip"
+
+    - name: Copy BadBlood ZIP to Windows Server
+      win_copy:
+        src: "/tmp/BadBlood.zip"
+        dest: "C:\\BadBlood.zip"
+
+    - name: Extract and Rename BadBlood Folder
+      win_shell: |
+        if (!(Test-Path C:\BadBlood)) {
+            Expand-Archive -Path C:\BadBlood.zip -DestinationPath C:\ -Force
+            $extractedFolder = Get-Item C:\BadBlood-*
+            Rename-Item -Path $extractedFolder.FullName -NewName BadBlood
+        }
+      args:
+        creates: C:\BadBlood
+
+    - name: Nuclear Patch - Strip all interactive prompts from BadBlood source code
+      win_shell: |
+        Get-ChildItem -Path C:\BadBlood\* -Include *.ps1, *.psm1 -Recurse | ForEach-Object {
+            $file = $_.FullName
+            $content = Get-Content $file
+            $modified = $content | ForEach-Object {
+                $_ -replace '(?i)\$host\.ui\.rawui\.readkey\(.*?\)', '$null' `
+                   -replace '(?i)Read-Host.*', '"BadBlood"' `
+                   -replace '(?i)cmd\.exe /c pause', 'Write-Output "CMD Pause skipped"' `
+                   -replace '(?i)\bpause\b', 'Write-Output "Pause skipped"'
+            }
+            Set-Content -Path $file -Value $modified
+        }
+
+    - name: Run BadBlood
+      win_shell: |
+        Start-Transcript -Path C:\BadBlood_Run.log -Force
+        cd C:\BadBlood
+        $ConfirmPreference = 'None'
+        $ProgressPreference = 'SilentlyContinue'
+        $WarningPreference = 'SilentlyContinue'
+        
+        .\Invoke-BadBlood.ps1
+        Stop-Transcript
+      args:
+        creates: C:\BadBlood_Run.log
+      async: 3600
+      poll: 30

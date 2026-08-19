@@ -1,0 +1,58 @@
+---
+- name: Install Sysmon with SwiftOnSecurity config
+  hosts: ad_server:workstation
+  vars:
+    sysmon_url: "https://download.sysinternals.com/files/Sysmon.zip"
+    sysmon_config_url: "https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/master/sysmonconfig-export.xml"
+
+  tasks:
+    - name: Download Sysmon zip to local machine
+      delegate_to: localhost
+      run_once: true
+      get_url:
+        url: "{{ sysmon_url }}"
+        dest: "/tmp/Sysmon.zip"
+
+    - name: Download SwiftOnSecurity Sysmon config to local machine
+      delegate_to: localhost
+      run_once: true
+      get_url:
+        url: "{{ sysmon_config_url }}"
+        dest: "/tmp/sysmonconfig.xml"
+
+    - name: Create Sysmon working directory
+      win_file:
+        path: C:\Tools\Sysmon
+        state: directory
+
+    - name: Copy Sysmon zip to Windows nodes
+      win_copy:
+        src: "/tmp/Sysmon.zip"
+        dest: C:\Tools\Sysmon\Sysmon.zip
+
+    - name: Extract Sysmon
+      win_unzip:
+        src: C:\Tools\Sysmon\Sysmon.zip
+        dest: C:\Tools\Sysmon
+        remote_src: true
+
+    - name: Copy SwiftOnSecurity Sysmon config to Windows nodes
+      win_copy:
+        src: "/tmp/sysmonconfig.xml"
+        dest: C:\Tools\Sysmon\sysmonconfig.xml
+
+    - name: Check if Sysmon already installed
+      win_shell: "Get-Service sysmon64 -ErrorAction SilentlyContinue"
+      register: sysmon_check
+      failed_when: false
+      changed_when: false
+
+    - name: Install Sysmon with config
+      win_shell: >
+        C:\Tools\Sysmon\Sysmon64.exe -accepteula -i C:\Tools\Sysmon\sysmonconfig.xml
+      when: sysmon_check.stdout == ""
+
+    - name: Update Sysmon config if already installed (idempotent path)
+      win_shell: >
+        C:\Tools\Sysmon\Sysmon64.exe -c C:\Tools\Sysmon\sysmonconfig.xml
+      when: sysmon_check.stdout != ""
