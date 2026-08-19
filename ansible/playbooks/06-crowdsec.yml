@@ -58,10 +58,6 @@
           labels:
             type: windows_firewall
       notify: restart crowdsec windows service
-      # NOT: windows-firewall collection'ini kullanmak icin bu ikinci kaynak
-      # gerekliydi - onceki halinde sadece Security 4624/4625 okunuyordu,
-      # kurulu diger collection'lar (iis, mssql, http-*) icin de kendi log
-      # kaynaklarini eklemen gerekir, aksi halde kurulu olup veri almazlar.
 
   handlers:
     - name: restart crowdsec windows service
