@@ -267,30 +267,28 @@ main() {
     fi
 
     start_vm "$LAB_ROOT/vms/windows-server-2022/winserver-ad.vmx"
-    # Windows Server VM'inin hazır olmasını beklemek için 2 dakika ek süre ver
+    
     sleep 120
 
     log "=== 3/3 Windows 11 Workstation build & start ===" >&2
     if [ ! -f "$LAB_ROOT/vms/windows-11/win11-workstation.vmx" ]; then
-        log "Packer devre dışı! VM doğrudan Bash (create-win11-vm.sh) ile oluşturuluyor..." >&2
+        log "Packer disabled! The VM is being created directly via Bash (create-win11-vm.sh)..." >&2
         bash "$LAB_ROOT/network/create-win11-vm.sh" --force # Force rebuild for VMX changes to take effect
     else
-        log "Windows 11 VM zaten mevcut, oluşturma adımı atlanıyor." >&2
+        log "Windows 11 VM already exists; skipping creation step.." >&2
     fi
     
-    # VM'i GUI ile başlat
+  
     start_vm "$LAB_ROOT/vms/windows-11/win11-workstation.vmx"
     
     log "ATTENTION: If you see 'Press any key...' on the screen, immediately click on the virtual machine and press the Spacebar! (VM starts automatically, but this warning is a precaution.)" >&2
 
-    # Her iki Windows makinesinin de WinRM'inin hazır olmasını bekle ve IP'lerini al
-    # Bu fonksiyon, 192.168.10.10-50 aralığındaki tüm WinRM açık IP'leri bulur
-    # ve Ansible bağlantı kontrolü ile doğru eşleşmeyi sağlar.
+   
     local -a all_winrm_ips
     all_winrm_ips=( $(find_all_winrm_ips) )
 
     if [ "${#all_winrm_ips[@]}" -lt 2 ]; then
-        die "AD Server ve Workstation için yeterli WinRM IP adresi bulunamadı. (Bulunan: ${all_winrm_ips[*]})"
+        die "Insufficient WinRM IP addresses found for the AD Server and Workstation. (Found: ${all_winrm_ips[*]})"
     fi
 
     local FOUND_AD_IP=""
@@ -298,16 +296,16 @@ main() {
 
     log "Found WinRM IP addresses: ${all_winrm_ips[*]}" >&2
 
-    # Her bir IP'nin hostname'ini sorgulayarak doğru eşleştirmeyi yap
+    
     for ip in "${all_winrm_ips[@]}"; do
         log "Querying hostname for $ip..." >&2
-        # Windows Server Administrator kullanıcısı ile başlar
+        
         local hostname=$(get_hostname_via_winrm "$ip" "Administrator" "${WINRM_PASSWORD}")
         if [ $? -eq 0 ] && [[ "$hostname" == "WINSERVER-AD"* ]]; then
             FOUND_AD_IP="$ip"
             log "AD Server IP address verified: $FOUND_AD_IP" >&2
         else
-            # Workstation Admin kullanıcısı ile başlar
+            #
             local hostname_ws=$(get_hostname_via_winrm "$ip" "Admin" "${WINRM_PASSWORD}")
             if [ $? -eq 0 ] && [[ "$hostname_ws" == "WIN11-WKS"* ]]; then
                 FOUND_WS_IP="$ip"
@@ -319,13 +317,13 @@ main() {
     done
 
     if [ -z "$FOUND_AD_IP" ] || [ -z "$FOUND_WS_IP" ]; then
-        die "AD Server veya Workstation IP adresi doğru şekilde tanımlanamadı. Lütfen VM'lerin çalıştığından ve WinRM'in açık olduğundan emin olun."
+        die "The AD Server or Workstation IP address could not be correctly identified. Please ensure that the VMs are running and WinRM is enabled."
     fi
 
-    log "AD Server Hazır: $FOUND_AD_IP" >&2
-    log "Workstation Hazır: $FOUND_WS_IP" >&2
+    log "AD Server Ready: $FOUND_AD_IP" >&2
+    log "Workstation Ready: $FOUND_WS_IP" >&2
 
-    log "Ansible inventory güncelleniyor..." >&2
+    log "Updating Ansible inventory..." >&2
     cat > "$LAB_ROOT/ansible/inventory/hosts.ini" <<EOF
 [ad_server]
 $FOUND_AD_IP ansible_user=Administrator ansible_password=${WINRM_PASSWORD} ansible_connection=winrm ansible_winrm_transport=basic ansible_winrm_server_cert_validation=ignore ansible_port=5985
@@ -338,14 +336,14 @@ ad_server
 workstation
 EOF
 
-    # Ansible bağlantı kontrolü ekle
-    log "Ansible bağlantısı kontrol ediliyor..." >&2
+    
+    log "Performing Ansible connection check..." >&2
     ansible ad_server -m win_ping -i "$LAB_ROOT/ansible/inventory/hosts.ini" --user Administrator --extra-vars "ansible_password=${WINRM_PASSWORD}" || die "AD Server'a Ansible bağlantısı başarısız oldu!" >&2
-    # Workstation için WinRM'in tamamen hazır olmasını beklemek için timeout ve operation_timeout ayarlarını kullan
+    
     ansible workstation -m win_ping -i "$LAB_ROOT/ansible/inventory/hosts.ini" --user Admin --extra-vars "ansible_password=${WINRM_PASSWORD}" -e "ansible_winrm_read_timeout=900 ansible_winrm_operation_timeout=600" -T 300 -vvv || die "Workstation'a Ansible bağlantısı başarısız oldu!" >&2
     log "Ansible bağlantıları başarılı." >&2
 
-    log "Ansible playbook'ları çalıştırılıyor..." >&2
+    log "Ansible playbooks are being executed..." >&2
     run_ansible "02-ad-domain.yml"
     run_ansible "03-badblood.yml"
     run_ansible "04-workstation-join.yml"
@@ -355,7 +353,7 @@ EOF
     log "=== Kontrol Komutları ===" >&2
     ansible all -i "$LAB_ROOT/ansible/inventory/hosts.ini" -m win_shell -a "Get-Service crowdsec | Select-Object Status; cd 'C:\Program Files\CrowdSec'; .\cscli.exe collections list"
     ansible all -i "$LAB_ROOT/ansible/inventory/hosts.ini" -m win_shell -a "Get-Service crowdsec | Select-Object Status"
-    # Not: nano ansible/playbooks/06-crowdsec.yml komutu manuel düzenleme içindir, burada çalıştırılmayacaktır.
+    
     ansible all -i "$LAB_ROOT/ansible/inventory/hosts.ini" -m win_shell -a "Get-Content C:\ProgramData\CrowdSec\log\crowdsec.log -Tail 15"
     ansible all -i "$LAB_ROOT/ansible/inventory/hosts.ini" -m win_service -a "name=crowdsec state=started"
     ansible all -i "$LAB_ROOT/ansible/inventory/hosts.ini" -m win_shell -a "Get-Service sysmon64 | Select-Object Status, Name"
@@ -363,7 +361,7 @@ EOF
     ansible ad_server -i "$LAB_ROOT/ansible/inventory/hosts.ini" -m win_shell -a "(Get-ADUser -Filter *).Count"
 
     log "=========================================================" >&2
-    log "SOC Lab kurulumu kusursuz bir şekilde tamamlandı!" >&2
+    log "The SOC Lab setup has been completed flawlessly!" >&2
     log "=========================================================" >&2
 }
 main "$@"
