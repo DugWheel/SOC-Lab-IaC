@@ -1,14 +1,16 @@
 ---
-- name: Promote Windows Server to Domain Controller
+- name: Promote Windows Server to a Domain Controller
   hosts: ad_server
-  gather_facts: true
   vars:
-     domain_name: "soclab.local"
-     netbios_name: "SOCLAB"
-     safe_mode_password: "SafeModeP@ss123!"
+    domain_name: "soclab.local"
+    netbios_name: "SOCLAB"
+    safe_mode_password: "ChangeMe123!"
+    domain_admin_password: "S0cL@bPassword2026!"
+    lan_gw: "192.168.10.254"
+ 
   tasks:
-    - name: Install AD-Domain-Services feature
-      win_feature:
+    - name: Install the AD-Domain-Services feature
+      ansible.windows.win_feature:
         name: AD-Domain-Services
         include_management_tools: true
         include_sub_features: true
@@ -17,11 +19,11 @@
       async: 600
       poll: 15
 
-    - name: Reboot if required after feature install
-      win_reboot:
+    - name: Reboot if required after the feature install
+      ansible.windows.win_reboot:
       when: adds_install.reboot_required
 
-    - name: Promote server to Domain Controller (new forest)
+    - name: Promote the server to a Domain Controller (new forest)
       microsoft.ad.domain:
         dns_domain_name: "{{ domain_name }}"
         safe_mode_password: "{{ safe_mode_password }}"
@@ -30,25 +32,84 @@
       poll: 15
 
     - name: Reboot after promotion
-      win_reboot:
+      ansible.windows.win_reboot:
         reboot_timeout: 900
       when: domain_promo.reboot_required
 
-    - name: Wait for domain to be fully up after reboot
-      win_wait_for:
+    - name: Wait until LDAP (389) is available
+      ansible.windows.win_wait_for:
         port: 389
         timeout: 300
 
-    - name: Configure DNS Forwarder on Domain Controller
-      win_shell: |
-        Set-DnsServerForwarder -IPAddress 192.168.10.1 -PassThru
+    - name: Point the DNS forwarder at pfSense
+      ansible.windows.win_shell:
+        cmd: "Set-DnsServerForwarder -IPAddress {{ lan_gw }} -PassThru"
 
-    - name: Create a test domain admin account (optional, for lab)
+    - name: Create the domain admin account used by the lab
       microsoft.ad.user:
         name: labadmin
-        password: "S0cL@bPassword2026!"
+        password: "{{ domain_admin_password }}"
         state: present
         password_never_expires: true
         groups:
           add:
             - Domain Admins
+
+    - name: Disable Windows Defender Real-Time Monitoring and Group Policy keys
+      ansible.windows.win_shell:
+        cmd: |
+          Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisableIOAVProtection $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisableBehaviorMonitoring $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisableBlockAtFirstSeen $true -ErrorAction SilentlyContinue
+          Set-MpPreference -DisableScriptScanning $true -ErrorAction SilentlyContinue
+          Set-MpPreference -SubmitSamplesConsent 2 -ErrorAction SilentlyContinue
+          Set-MpPreference -MAPSReporting 0 -ErrorAction SilentlyContinue
+
+          Add-MpPreference -ExclusionPath 'C:\' -ErrorAction SilentlyContinue
+
+          $defPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender'
+          $rtpPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection'
+          if (-not (Test-Path $defPath)) { New-Item -Path $defPath -Force | Out-Null }
+          if (-not (Test-Path $rtpPath)) { New-Item -Path $rtpPath -Force | Out-Null }
+
+          Set-ItemProperty -Path $defPath -Name 'DisableAntiSpyware' -Value 1 -Type DWord -Force
+          Set-ItemProperty -Path $rtpPath -Name 'DisableRealtimeMonitoring' -Value 1 -Type DWord -Force
+          Set-ItemProperty -Path $rtpPath -Name 'DisableBehaviorMonitoring' -Value 1 -Type DWord -Force
+          Set-ItemProperty -Path $rtpPath -Name 'DisableOnAccessProtection' -Value 1 -Type DWord -Force
+          Set-ItemProperty -Path $rtpPath -Name 'DisableScanOnRealtimeEnable' -Value 1 -Type DWord -Force
+          Write-Output 'DEFENDER_DISABLED'
+      register: defender_disable
+      changed_when: "'DEFENDER_DISABLED' in defender_disable.stdout"
+
+    - name: Enable Advanced Audit Policies for Kerberos, DCSync, and AD Changes (auditpol)
+      ansible.windows.win_shell:
+        cmd: |
+          auditpol /set /subcategory:"Kerberos Service Ticket Operations" /success:enable /failure:enable
+          auditpol /set /subcategory:"Kerberos Authentication Service" /success:enable /failure:enable
+          auditpol /set /subcategory:"Directory Service Access" /success:enable /failure:enable
+          auditpol /set /subcategory:"Directory Service Changes" /success:enable /failure:enable
+          auditpol /set /subcategory:"Security Group Management" /success:enable /failure:enable
+          auditpol /set /subcategory:"User Account Management" /success:enable /failure:enable
+          auditpol /set /subcategory:"Logon" /success:enable /failure:enable
+      changed_when: true
+
+    - name: Configure AD Domain Root SACL for DCSync (4662) and DACL/ShadowCreds (5136) auditing
+      ansible.windows.win_shell:
+        cmd: |
+          Import-Module ActiveDirectory
+          $domainDN = (Get-ADDomain).DistinguishedName
+          $adPath = "AD:\$domainDN"
+          $acl = Get-Acl -Path $adPath
+
+          $sid = New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0')
+          $rights = [System.DirectoryServices.ActiveDirectoryRights]::ExtendedRight -bor [System.DirectoryServices.ActiveDirectoryRights]::WriteDacl -bor [System.DirectoryServices.ActiveDirectoryRights]::WriteProperty
+          $auditFlags = [System.Security.AccessControl.AuditFlags]::Success -bor [System.Security.AccessControl.AuditFlags]::Failure
+          $inheritance = [System.DirectoryServices.ActiveDirectorySecurityInheritance]::All
+
+          $auditRule = New-Object System.DirectoryServices.ActiveDirectoryAuditRule($sid, $rights, $auditFlags, $inheritance)
+          $acl.AddAuditRule($auditRule)
+          Set-Acl -Path $adPath -AclObject $acl
+          Write-Output 'SACL_CONFIGURED'
+      register: ad_sacl_cfg
+      changed_when: "'SACL_CONFIGURED' in ad_sacl_cfg.stdout"

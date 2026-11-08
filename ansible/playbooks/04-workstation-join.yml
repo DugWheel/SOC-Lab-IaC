@@ -1,19 +1,17 @@
----
-- name: Join Windows 11 workstation to the domain
+- name: Join the Windows 11 workstation to the domain
   hosts: workstation
   vars:
     domain_name: "soclab.local"
-    domain_admin_user: "labadmin@soclab.local" 
+    domain_admin_user: "labadmin@soclab.local"
     domain_admin_password: "S0cL@bPassword2026!"
-
   tasks:
-    - name: Set DNS server to Domain Controller so it can find the domain
-      win_dns_client:
+    - name: Point the workstation DNS at the Domain Controller
+      ansible.windows.win_dns_client:
         adapter_names: "*"
         ipv4_addresses:
           - "{{ groups['ad_server'][0] }}"
 
-    - name: Join domain
+    - name: Join the domain
       microsoft.ad.membership:
         dns_domain_name: "{{ domain_name }}"
         domain_admin_user: "{{ domain_admin_user }}"
@@ -21,15 +19,17 @@
         state: domain
       register: domain_join
 
-    - name: Ensure WinRM service is running and configured for basic auth after domain join
-      win_shell: |
+    - name: Re-arm WinRM (basic auth) after the domain join
+      ansible.windows.win_shell: |
         Set-Service -Name WinRM -StartupType Automatic
         Start-Service -Name WinRM -Force
         winrm set winrm/config/service/auth @{Basic="true"}
         winrm set winrm/config/client @{AllowUnencrypted="true"}
-        Set-NetFirewallRule -DisplayName "Windows Remote Management (HTTP-In)" -Enabled True -Action Allow -Direction In -Profile Domain,Private
+        Set-NetFirewallRule -DisplayName "Windows Remote Management (HTTP-In)" `
+          -Enabled True -Action Allow -Direction In -Profile Domain,Private
+      changed_when: false
 
-    - name: Reboot after joining domain
-      win_reboot:
+    - name: Reboot after joining the domain
+      ansible.windows.win_reboot:
         reboot_timeout: 600
       when: domain_join.reboot_required

@@ -1,0 +1,236 @@
+<group name="local,attack,authentication_failed,">
+
+  <rule id="100010" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>60122</if_matched_sid>
+    <same_field>win.eventdata.targetUserName</same_field>
+    <field name="win.eventdata.targetUserName" negate="yes">\$$|^ANONYMOUS LOGON$</field>
+    <description>Brute Force: Multiple failed logon attempts for user $(win.eventdata.targetUserName) in 120s</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+  </rule>
+
+  <rule id="100020" level="10" frequency="8" timeframe="120">
+    <if_matched_sid>60122</if_matched_sid>
+    <same_field>win.eventdata.ipAddress</same_field>
+    <different_field>win.eventdata.targetUserName</different_field>
+    <field name="win.eventdata.ipAddress" negate="yes">^::1$|^127\.0\.0\.1$|^-$|^fe80:</field>
+    <field name="win.eventdata.targetUserName" negate="yes">\$$|^ANONYMOUS LOGON$</field>
+    <description>Password Spraying: Multiple failed logon attempts across different users from IP $(win.eventdata.ipAddress) in 120s</description>
+    <mitre>
+      <id>T1110.003</id>
+    </mitre>
+  </rule>
+  
+  <rule id="100080" level="12">
+    <if_sid>60106,92652</if_sid>
+    <field name="win.eventdata.logonType">^3$</field>
+    <field name="win.eventdata.logonProcessName" type="pcre2">(?i)NtLmSsp</field>
+    <field name="win.eventdata.targetUserName" type="pcre2">(?i)^(Administrator|labadmin)$</field>
+    <field name="win.eventdata.ipAddress" negate="yes">^127\.0\.0\.1$|^::1$|^-$|^192\.168\.10\.10$</field>
+    <description>Suspicious NTLM Network Logon (Possible Pass-the-Hash) to privileged account $(win.eventdata.targetUserName) from $(win.eventdata.ipAddress)</description>
+    <mitre>
+      <id>T1550.002</id>
+    </mitre>
+  </rule>
+  <rule id="100012" level="12">
+    <if_matched_sid>100020</if_matched_sid>
+    <if_sid>60106,92652,100080</if_sid>
+    <same_field>win.eventdata.ipAddress</same_field>
+    <field name="win.eventdata.targetUserName" negate="yes">^ANONYMOUS LOGON$|\$$</field>
+    <description>Account Compromised: Successful logon for $(win.eventdata.targetUserName) from $(win.eventdata.ipAddress) after Password Spraying</description>
+    <mitre>
+      <id>T1110.003</id>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+  <rule id="100011" level="12">
+    <if_matched_sid>100010</if_matched_sid>
+    <if_sid>60106,92652,100080</if_sid>
+    <same_field>win.eventdata.targetUserName</same_field>
+    <description>Account Compromised: Successful logon for $(win.eventdata.targetUserName) after brute force</description>
+    <mitre>
+      <id>T1110.001</id>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+</group>
+
+<group name="local,credential_access,">
+
+  <rule id="100031" level="12">
+    <if_sid>61612</if_sid>
+    <field name="win.eventdata.targetImage" type="pcre2">(?i)\\\\lsass\.exe$</field>
+    <field name="win.eventdata.grantedAccess" type="pcre2">(?i)^(0x1010|0x1038|0x1400|0x1410|0x1418|0x143a|0x1438|0x1fffff)$</field>
+    <field name="win.eventdata.sourceImage" type="pcre2" negate="yes">(?i)\\\\(MsMpEng|csrss|svchost|wininit|wmiprvse|taskmgr)\.exe$</field>
+    <description>Credential Dumping: Suspicious LSASS Memory Access ($(win.eventdata.grantedAccess)) by $(win.eventdata.sourceImage)</description>
+    <mitre>
+      <id>T1003.001</id>
+    </mitre>
+  </rule>
+
+  <rule id="100032" level="15">
+    <if_sid>100031</if_sid>
+    <field name="win.eventdata.sourceImage" type="pcre2">(?i)(rundll32|mimikatz|procdump|comsvcs|nanodump|taskmgr)</field>
+    <description>CRITICAL: Known credential dumping tool ($(win.eventdata.sourceImage)) accessed LSASS memory</description>
+    <mitre>
+      <id>T1003.001</id>
+    </mitre>
+  </rule>
+
+</group>
+
+<group name="local,persistence,account_manipulation,">
+
+  <rule id="100040" level="12">
+    <if_sid>60109</if_sid>
+    <field name="win.eventdata.subjectUserName" type="pcre2" negate="yes">(?i)\$$</field>
+    <description>Persistence: Account $(win.eventdata.subjectUserName) created new domain user $(win.eventdata.targetUserName) (T1136.002)</description>
+    <mitre>
+      <id>T1136.002</id>
+    </mitre>
+  </rule>
+  <rule id="100041" level="15">
+    <if_sid>92036,61603</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)net(\.exe)?\s+user\s+.+/add</field>
+    <field name="win.eventdata.parentCommandLine" type="pcre2">(?i)ADMIN\$\\__</field>
+    <description>CRITICAL: Remote backdoor user creation via Impacket WMIExec ($(win.eventdata.commandLine))</description>
+    <mitre>
+      <id>T1136.002</id>
+      <id>T1047</id>
+    </mitre>
+  </rule>
+
+  <rule id="100042" level="12">
+    <if_sid>60110</if_sid>
+    <field name="win.eventdata.oldUacValue" type="pcre2">(?i)^0x15$</field>
+    <field name="win.eventdata.subjectUserName" type="pcre2" negate="yes">(?i)\$$</field>
+    <description>Persistence: Newly created domain user $(win.eventdata.targetUserName) enabled and initialized by $(win.eventdata.subjectUserName) (T1136.002)</description>
+    <mitre>
+      <id>T1136.002</id>
+    </mitre>
+  </rule>
+</group>
+
+<group name="local,ad_security,persistence,credential_access,">
+
+  <rule id="100050" level="15">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^5136$</field>
+    <field name="win.eventdata.attributeLDAPDisplayName" type="pcre2">(?i)ntSecurityDescriptor</field>
+    <field name="win.eventdata.attributeValue" type="pcre2">(?i)1131f6aa|1131f6ad|1131f6a2</field>
+    <description>CRITICAL: DCSync replication rights granted by $(win.eventdata.subjectUserName) on $(win.eventdata.objectDN) (T1484.001)</description>
+    <mitre>
+      <id>T1484.001</id>
+      <id>T1098</id>
+    </mitre>
+  </rule>
+
+  <rule id="100051" level="12">
+    <if_sid>60103,60104</if_sid>
+    <field name="win.system.eventID">^4662$</field>
+    <field name="win.eventdata.properties" type="pcre2">(?i)1131f6aa|1131f6ad|89e95b76</field>
+    <description>Active Directory: Directory Replication (DCSync) rights exercised by $(win.eventdata.subjectUserName) (T1003.006)</description>
+    <mitre>
+      <id>T1003.006</id>
+    </mitre>
+  </rule>
+
+  <rule id="100052" level="15">
+    <if_sid>100051</if_sid>
+    <field name="win.eventdata.subjectUserName" type="pcre2" negate="yes">(?i)(\$$|^SYSTEM$|^LOCAL SERVICE$)</field>
+    <description>CRITICAL: DCSync attack executed by non-machine account $(win.eventdata.subjectUserName)! (T1003.006)</description>
+    <mitre>
+      <id>T1003.006</id>
+    </mitre>
+  </rule>
+
+  <rule id="100060" level="12">
+    <if_sid>60103,60106</if_sid>
+    <field name="win.system.eventID">^4769$</field>
+    <field name="win.eventdata.ticketEncryptionType" type="pcre2">(?i)^0x17$</field>
+    <field name="win.eventdata.serviceName" type="pcre2" negate="yes">(?i)(^krbtgt$|\$$)</field>
+    <field name="win.eventdata.targetUserName" type="pcre2" negate="yes">(?i)\$$</field>
+    <description>Kerberoasting: RC4-encrypted TGS ticket requested for service $(win.eventdata.serviceName) by $(win.eventdata.targetUserName)</description>
+    <mitre>
+      <id>T1558.003</id>
+    </mitre>
+  </rule>
+
+  <rule id="100061" level="15" frequency="3" timeframe="60">
+    <if_matched_sid>100060</if_matched_sid>
+    <same_field>win.eventdata.ipAddress</same_field>
+    <description>CRITICAL: Automated Kerberoasting attack detected from $(win.eventdata.ipAddress)</description>
+    <mitre>
+      <id>T1558.003</id>
+    </mitre>
+  </rule>
+
+  <rule id="100062" level="13">
+    <if_sid>60103,60106,60112</if_sid>
+    <field name="win.system.eventID">^4768$</field>
+    <field name="win.eventdata.preAuthType">^0$</field>
+    <field name="win.eventdata.ticketEncryptionType" type="pcre2">(?i)^0x17$</field>
+    <description>AS-REP Roasting: TGT requested without pre-authentication for $(win.eventdata.targetUserName) from $(win.eventdata.ipAddress)</description>
+    <mitre>
+      <id>T1558.004</id>
+    </mitre>
+  </rule>
+
+  
+  <rule id="100070" level="10">
+    <if_sid>60103,60111</if_sid>
+    <field name="win.system.eventID">^4724$</field>
+    <field name="win.eventdata.subjectUserName" type="pcre2" negate="yes">(?i)(^ANONYMOUS LOGON$|\$$)</field>
+    <description>AD Password Reset (4724): $(win.eventdata.subjectUserName) reset password for $(win.eventdata.targetUserName)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+  </rule>
+
+  
+  <rule id="100071" level="14" frequency="3" timeframe="300">
+    <if_matched_sid>100070</if_matched_sid>
+    <description>HIGH: Rapid AD Password Reset Chain detected! Latest: $(win.eventdata.subjectUserName) -> $(win.eventdata.targetUserName) (Possible ACL/GenericAll Abuse via bloodyAD)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1078.002</id>
+    </mitre>
+  </rule>
+
+  
+  <rule id="100073" level="10">
+    <if_sid>60110</if_sid>
+    <field name="win.eventdata.passwordLastSet" type="pcre2">^[0-9]</field>
+    <field name="win.eventdata.subjectUserName" type="pcre2" negate="yes">(?i)(^ANONYMOUS LOGON$|\$$)</field>
+    <description>AD Password Modified via LDAP (4738): $(win.eventdata.subjectUserName) changed password for $(win.eventdata.targetUserName)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+  </rule>
+  
+  <rule id="100075" level="15">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^5136$</field>
+    <field name="win.eventdata.attributeLDAPDisplayName" type="pcre2">(?i)^msDS-KeyCredentialLink$</field>
+    <description>CRITICAL: Shadow Credentials attack detected! $(win.eventdata.subjectUserName) modified msDS-KeyCredentialLink on $(win.eventdata.objectDN)</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+  </rule>
+
+
+  <rule id="100063" level="14">
+    <if_sid>60103</if_sid>
+    <field name="win.system.eventID">^5136$</field>
+    <field name="win.eventdata.attributeLDAPDisplayName" type="pcre2">(?i)^servicePrincipalName$</field>
+    <field name="win.eventdata.subjectUserName" type="pcre2" negate="yes">(?i)\$$</field>
+    <description>HIGH: Targeted Kerberoasting preparation! $(win.eventdata.subjectUserName) modified servicePrincipalName ($(win.eventdata.attributeValue)) on $(win.eventdata.objectDN)</description>
+    <mitre>
+      <id>T1098</id>
+      <id>T1558.003</id>
+    </mitre>
+  </rule>
+</group>

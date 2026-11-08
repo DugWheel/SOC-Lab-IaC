@@ -1,58 +1,58 @@
 ---
-- name: Install Sysmon with SwiftOnSecurity config
-  hosts: ad_server:workstation
+- name: Install and configure Sysmon (SwiftOnSecurity config)
+  hosts: domain_hosts
   vars:
     sysmon_url: "https://download.sysinternals.com/files/Sysmon.zip"
     sysmon_config_url: "https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/master/sysmonconfig-export.xml"
-
+    sysmon_dir: 'C:\Tools\Sysmon'
   tasks:
-    - name: Download Sysmon zip to local machine
+    - name: Download Sysmon and its configuration on the controller
       delegate_to: localhost
+      become: false
       run_once: true
-      get_url:
-        url: "{{ sysmon_url }}"
-        dest: "/tmp/Sysmon.zip"
+      ansible.builtin.get_url:
+        url: "{{ item.url }}"
+        dest: "{{ item.dest }}"
+        mode: "0644"
+      loop:
+        - { url: "{{ sysmon_url }}",        dest: /tmp/Sysmon.zip }
+        - { url: "{{ sysmon_config_url }}", dest: /tmp/sysmonconfig.xml }
 
-    - name: Download SwiftOnSecurity Sysmon config to local machine
-      delegate_to: localhost
-      run_once: true
-      get_url:
-        url: "{{ sysmon_config_url }}"
-        dest: "/tmp/sysmonconfig.xml"
-
-    - name: Create Sysmon working directory
-      win_file:
-        path: C:\Tools\Sysmon
+    - name: Ensure the Sysmon working directory exists
+      ansible.windows.win_file:
+        path: "{{ sysmon_dir }}"
         state: directory
 
-    - name: Copy Sysmon zip to Windows nodes
-      win_copy:
-        src: "/tmp/Sysmon.zip"
-        dest: C:\Tools\Sysmon\Sysmon.zip
+    - name: Copy the Sysmon archive and configuration to the host
+      ansible.windows.win_copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+      loop:
+        - { src: /tmp/Sysmon.zip,        dest: 'C:\Tools\Sysmon\Sysmon.zip' }
+        - { src: /tmp/sysmonconfig.xml,  dest: 'C:\Tools\Sysmon\sysmonconfig.xml' }
 
-    - name: Extract Sysmon
-      win_unzip:
-        src: C:\Tools\Sysmon\Sysmon.zip
-        dest: C:\Tools\Sysmon
+    - name: Extract the Sysmon archive
+      community.windows.win_unzip:
+        src: '{{ sysmon_dir }}\Sysmon.zip'
+        dest: "{{ sysmon_dir }}"
         remote_src: true
+        creates: '{{ sysmon_dir }}\Sysmon64.exe'
 
-    - name: Copy SwiftOnSecurity Sysmon config to Windows nodes
-      win_copy:
-        src: "/tmp/sysmonconfig.xml"
-        dest: C:\Tools\Sysmon\sysmonconfig.xml
+    - name: Query the Sysmon service state
+      ansible.windows.win_service_info:
+        name: sysmon64
+      register: sysmon_service
 
-    - name: Check if Sysmon already installed
-      win_shell: "Get-Service sysmon64 -ErrorAction SilentlyContinue"
-      register: sysmon_check
-      failed_when: false
-      changed_when: false
+    - name: Install / re-apply the Sysmon configuration
+      ansible.windows.win_shell: >-
+        {{ sysmon_dir }}\Sysmon64.exe
+        {{ '-accepteula -i' if not sysmon_service.exists else '-c' }}
+        {{ sysmon_dir }}\sysmonconfig.xml
+      register: sysmon_apply
+      changed_when: not sysmon_service.exists
 
-    - name: Install Sysmon with config
-      win_shell: >
-        C:\Tools\Sysmon\Sysmon64.exe -accepteula -i C:\Tools\Sysmon\sysmonconfig.xml
-      when: sysmon_check.stdout == ""
-
-    - name: Update Sysmon config if already installed (idempotent path)
-      win_shell: >
-        C:\Tools\Sysmon\Sysmon64.exe -c C:\Tools\Sysmon\sysmonconfig.xml
-      when: sysmon_check.stdout != ""
+    - name: Ensure the Sysmon service is running
+      ansible.windows.win_service:
+        name: sysmon64
+        state: started
+        start_mode: auto

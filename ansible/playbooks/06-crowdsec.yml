@@ -1,47 +1,49 @@
 ---
 - name: Install and configure CrowdSec on Windows hosts
-  hosts: ad_server:workstation
+  hosts: domain_hosts
   vars:
-    crowdsec_msi_path: "C:\\Tools\\crowdsec.msi"
-
+    crowdsec_dir: 'C:\Program Files\CrowdSec'
+    crowdsec_msi: 'C:\Tools\crowdsec.msi'
   tasks:
-    - name: Ensure Tools dir exists
-      win_file:
+    - name: Ensure C:\Tools exists
+      ansible.windows.win_file:
         path: C:\Tools
         state: directory
 
-    - name: Download CrowdSec MSI dynamically via GitHub API
-      win_shell: |
+    - name: Download the latest CrowdSec MSI
+      ansible.windows.win_shell: |
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $ProgressPreference = 'SilentlyContinue'
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/crowdsecurity/crowdsec/releases/latest" -UseBasicParsing
         $msi = $release.assets | Where-Object { $_.name -match '\.msi$' } | Select-Object -First 1
-        if (-not $msi) { throw "CrowdSec MSI release not found!" }
-        Invoke-WebRequest -Uri $msi.browser_download_url -OutFile "C:\Tools\crowdsec.msi" -UseBasicParsing
+        if (-not $msi) { throw "CrowdSec MSI not found in the latest release." }
+        Invoke-WebRequest -Uri $msi.browser_download_url -OutFile "{{ crowdsec_msi }}" -UseBasicParsing
       args:
-        creates: C:\Tools\crowdsec.msi
+        creates: "{{ crowdsec_msi }}"
 
     - name: Install CrowdSec silently
-      win_package:
-        path: "{{ crowdsec_msi_path }}"
-        arguments: "/quiet /norestart"
+      ansible.windows.win_package:
+        path: "{{ crowdsec_msi }}"
+        arguments: /quiet /norestart
         state: present
       async: 600
       poll: 15
 
-    - name: Update CrowdSec Hub (Repairs missing index.json file)
-      win_shell: .\cscli.exe hub update
+    - name: Update the CrowdSec hub index
+      ansible.windows.win_shell: .\cscli.exe hub update
       args:
-        chdir: "C:\\Program Files\\CrowdSec"
+        chdir: "{{ crowdsec_dir }}"
+      changed_when: false
 
-    - name: Install windows-firewall collection
-      win_shell: .\cscli.exe collections install crowdsecurity/windows-firewall
+    - name: Install the crowdsecurity/windows-firewall collection
+      ansible.windows.win_shell: .\cscli.exe collections install crowdsecurity/windows-firewall
       args:
-        chdir: "C:\\Program Files\\CrowdSec"
+        chdir: "{{ crowdsec_dir }}"
+      changed_when: false
 
-    - name: Ensure acquis.yaml is configured for Windows Event Logs
-      win_copy:
-        dest: "C:\\ProgramData\\CrowdSec\\config\\acquis.yaml"
+    - name: Configure the Windows Event Log acquisition
+      ansible.windows.win_copy:
+        dest: 'C:\ProgramData\CrowdSec\config\acquis.yaml'
         content: |
           source: wineventlog
           event_channel: Security
@@ -57,10 +59,16 @@
           event_level: Information
           labels:
             type: windows_firewall
-      notify: restart crowdsec windows service
+      notify: Restart CrowdSec
+
+    - name: Ensure the CrowdSec service is running
+      ansible.windows.win_service:
+        name: crowdsec
+        state: started
+        start_mode: auto
 
   handlers:
-    - name: restart crowdsec windows service
-      win_service:
+    - name: Restart CrowdSec
+      ansible.windows.win_service:
         name: crowdsec
         state: restarted

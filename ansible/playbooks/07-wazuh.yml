@@ -1,0 +1,221 @@
+---
+# 07-wazuh.yml
+# 1) Deploys Wazuh SIEM  on Ubuntu Server in DMZ (192.168.20.10)
+# 2) Installs Wazuh Agents on Windows Server (DC) and Windows 11
+# 3) Configures Sysmon + Security + System log forwarding and forces Manager enrollment
+
+- name: Deploy Wazuh SIEM on Ubuntu Server (DMZ)
+  hosts: wazuh_server
+  become: true
+  vars:
+    wazuh_version: "4.7"
+    wazuh_manager_ip: "{{ wazuh_ip | default('192.168.20.10') }}"
+  tasks:
+    - name: Update apt cache and install prerequisites
+      ansible.builtin.apt:
+        name:
+          - curl
+          - tar
+          - ufw
+        state: present
+        update_cache: true
+
+    - name: Allow required Wazuh and SSH ports through UFW (if UFW is active)
+      community.general.ufw:
+        rule: allow
+        port: "{{ item.port }}"
+        proto: "{{ item.proto }}"
+      loop:
+        - { port: "22", proto: "tcp" }     # SSH
+        - { port: "443", proto: "tcp" }    # Wazuh Dashboard (HTTPS)
+        - { port: "1514", proto: "tcp" }   # Wazuh Agent event communication
+        - { port: "1515", proto: "tcp" }   # Wazuh Agent enrollment
+        - { port: "55000", proto: "tcp" }  # Wazuh Server API
+      ignore_errors: true
+
+    - name: Check if Wazuh Manager is already installed
+      ansible.builtin.stat:
+        path: /var/ossec/bin/wazuh-control
+      register: wazuh_installed
+
+    - name: Download Wazuh installation assistant
+      ansible.builtin.get_url:
+        url: "https://packages.wazuh.com/{{ wazuh_version }}/wazuh-install.sh"
+        dest: /tmp/wazuh-install.sh
+        mode: "0755"
+      when: not wazuh_installed.stat.exists
+
+    - name: Run Wazuh all-in-one installation (this takes 5-15 minutes)
+      ansible.builtin.command: bash /tmp/wazuh-install.sh -a -i
+      args:
+        chdir: /root
+        creates: /var/ossec/bin/wazuh-control
+      register: wazuh_install_run
+      when: not wazuh_installed.stat.exists
+      async: 2400
+      poll: 30
+
+    - name: Ensure Wazuh services are enabled and running
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - wazuh-indexer
+        - wazuh-manager
+        - wazuh-dashboard
+
+    - name: Wait for Wazuh Manager enrollment port (1515) to be ready
+      ansible.builtin.wait_for:
+        host: "0.0.0.0"
+        port: 1515
+        delay: 5
+        timeout: 120
+
+    - name: Get currently registered agents on Wazuh Manager
+      ansible.builtin.command: /var/ossec/bin/agent_control -l
+      register: manager_agent_list
+      changed_when: false
+
+    - name: Extract Wazuh admin password for user reference
+      ansible.builtin.shell: |
+        for tar_path in /root/wazuh-install-files.tar /home/*/wazuh-install-files.tar /tmp/wazuh-install-files.tar; do
+          if [ -f "$tar_path" ]; then
+            tar -axf "$tar_path" wazuh-install-files/wazuh-passwords.txt -O 2>/dev/null | \
+              grep -i -A 1 "indexer_username.*admin" | tail -n 1 | awk '{print $2}' | tr -d "'"
+            break
+          fi
+        done
+      register: wazuh_admin_pass
+      changed_when: false
+      failed_when: false
+
+    - name: Display Wazuh Dashboard Access Information
+      ansible.builtin.debug:
+        msg:
+          - "Wazuh Dashboard URL : https://{{ wazuh_manager_ip }}"
+          - "Username            : admin"
+          - "Password            : {{ wazuh_admin_pass.stdout if (wazuh_admin_pass.stdout | length > 0) else 'Run wazuh-passwords-tool.sh -a on Wazuh VM' }}"
+
+
+# ---------------------------------------------------------------------------
+# Windows Endpoints (WinServer AD + Win11) -> Agent Install & Sysmon Forwarding
+# ---------------------------------------------------------------------------
+- name: Deploy Wazuh Agent and Forward Sysmon + Security Logs on Windows Hosts
+  hosts: domain_hosts
+  gather_facts: true
+  vars:
+    wazuh_manager_ip: "{{ wazuh_ip | default('192.168.20.10') }}"
+    wazuh_agent_version: "4.7.5-1"
+    wazuh_msi_url: "https://packages.wazuh.com/4.x/windows/wazuh-agent-{{ wazuh_agent_version }}.msi"
+    wazuh_msi_path: 'C:\Windows\Temp\wazuh-agent-{{ wazuh_agent_version }}.msi'
+    wazuh_agent_dir: 'C:\Program Files (x86)\ossec-agent'
+  tasks:
+    - name: Ensure route to DMZ (192.168.20.0/24) via pfSense LAN gateway (192.168.10.254)
+      ansible.windows.win_shell: |
+        $dmzRoute = Get-NetRoute -DestinationPrefix "192.168.20.0/24" -ErrorAction SilentlyContinue
+        if (-not $dmzRoute) {
+          route -p add 192.168.20.0 mask 255.255.255.0 192.168.10.254 | Out-Null
+          Write-Output "ROUTE_ADDED"
+        }
+      register: dmz_route_res
+      changed_when: "'ROUTE_ADDED' in dmz_route_res.stdout"
+
+    - name: Check installed Wazuh Agent version (if any)
+      ansible.windows.win_shell: |
+        if (Test-Path "{{ wazuh_agent_dir }}\VERSION") {
+          Get-Content "{{ wazuh_agent_dir }}\VERSION"
+        } else {
+          Write-Output "NOT_INSTALLED"
+        }
+      register: installed_agent_ver
+      changed_when: false
+
+    - name: Remove incompatible Wazuh Agent version if not v4.7.x
+      ansible.windows.win_shell: |
+        Stop-Service -Name WazuhSvc -Force -ErrorAction SilentlyContinue
+        $app = Get-WmiObject -Class Win32_Product | Where-Object { $_.Name -match "Wazuh Agent" }
+        if ($app) { $app.Uninstall() | Out-Null }
+        Remove-Item -Path "{{ wazuh_agent_dir }}" -Recurse -Force -ErrorAction SilentlyContinue
+      when:
+        - "'NOT_INSTALLED' not in installed_agent_ver.stdout"
+        - "'v4.7' not in installed_agent_ver.stdout"
+
+    - name: Check if Wazuh Agent executable exists
+      ansible.windows.win_stat:
+        path: '{{ wazuh_agent_dir }}\wazuh-agent.exe'
+      register: agent_bin_stat
+
+    - name: Download Wazuh Agent MSI ({{ wazuh_agent_version }})
+      ansible.windows.win_get_url:
+        url: "{{ wazuh_msi_url }}"
+        dest: "{{ wazuh_msi_path }}"
+      when: not agent_bin_stat.stat.exists
+
+    - name: Install Wazuh Agent silently, pointing to Manager ({{ wazuh_manager_ip }})
+      ansible.windows.win_package:
+        path: "{{ wazuh_msi_path }}"
+        arguments: '/q WAZUH_MANAGER="{{ wazuh_manager_ip }}" WAZUH_REGISTRATION_SERVER="{{ wazuh_manager_ip }}" WAZUH_AGENT_NAME="{{ ansible_facts["hostname"] }}"'
+        state: present
+      when: not agent_bin_stat.stat.exists
+
+    - name: Deploy clean ossec.conf with Sysmon + Security + System log ingestion
+      ansible.windows.win_copy:
+        dest: '{{ wazuh_agent_dir }}\ossec.conf'
+        content: |
+          <ossec_config>
+            <client>
+              <server>
+                <address>{{ wazuh_manager_ip }}</address>
+                <port>1514</port>
+                <protocol>tcp</protocol>
+              </server>
+              <enrollment>
+                <enabled>yes</enabled>
+                <manager_address>{{ wazuh_manager_ip }}</manager_address>
+                <agent_name>{{ ansible_facts["hostname"] }}</agent_name>
+              </enrollment>
+            </client>
+
+            <!-- Sysmon telemetry -->
+            <localfile>
+              <location>Microsoft-Windows-Sysmon/Operational</location>
+              <log_format>eventchannel</log_format>
+            </localfile>
+
+            <!-- Windows Security log (4624/4625/4720/4768 etc.) -->
+            <localfile>
+              <location>Security</location>
+              <log_format>eventchannel</log_format>
+            </localfile>
+
+            <!-- System log -->
+            <localfile>
+              <location>System</location>
+              <log_format>eventchannel</log_format>
+            </localfile>
+          </ossec_config>
+      notify: Restart Wazuh Agent
+
+    - name: Force Agent Enrollment with Wazuh Manager if not registered on Server
+      ansible.windows.win_shell: |
+        Stop-Service -Name WazuhSvc -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "{{ wazuh_agent_dir }}\client.keys" -Force -ErrorAction SilentlyContinue
+        & "{{ wazuh_agent_dir }}\agent-auth.exe" -m "{{ wazuh_manager_ip }}" -A "{{ ansible_facts['hostname'] }}"
+        Start-Service -Name WazuhSvc
+      register: enroll_result
+      when: >
+        (hostvars[groups['wazuh_server'][0]]['manager_agent_list']['stdout'] is defined) and
+        (ansible_facts['hostname'] not in hostvars[groups['wazuh_server'][0]]['manager_agent_list']['stdout'])
+
+    - name: Ensure Wazuh Agent service (WazuhSvc) is running and set to auto-start
+      ansible.windows.win_service:
+        name: WazuhSvc
+        start_mode: auto
+        state: started
+
+  handlers:
+    - name: Restart Wazuh Agent
+      ansible.windows.win_service:
+        name: WazuhSvc
+        state: restarted
