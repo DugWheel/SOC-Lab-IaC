@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
-	<!--https://schneegans.de/windows/unattend-generator/?LanguageMode=Unattended&UILanguage=en-US&Locale=en-US&Keyboard=0000041f&GeoLocation=244&PEMode=Generated&DisableDefender=true&SkipIntegrityCheck=true&InstallFromMode=Name&InstallFromName=Windows+11+Enterprise+Evaluation&PartitionMode=Unattended&TargetDisk=0&SystemSize=300&PartitionLayout=Automatic&RecoveryMode=None&DiskAssertionMode=Skip&WindowsEditionMode=Generic&WindowsEdition=enterprise&ProcessorArchitecture=amd64&BypassRequirementsCheck=true&ComputerNameMode=Custom&ComputerName=WIN11-WKS&TimeZoneMode=Implicit&UserAccountMode=Unattended&AccountName0=Admin&AccountDisplayName0=Administrator&AccountPassword0=ChangeMe123%21&AccountGroup0=Administrators&AccountName1=User&AccountDisplayName1=&AccountPassword1=&AccountGroup1=Users&AutoLogonMode=Own&PasswordExpirationMode=Unlimited&LockoutMode=Default&HideFiles=HiddenSystem&HideInfoTip=true&TaskbarSearch=Box&TaskbarIconsMode=Default&StartTilesMode=Default&StartPinsMode=Default&DisableWindowsUpdate=true&DisableFastStartup=true&EnableLongPaths=true&EnableRemoteDesktop=true&AllowPowerShellScripts=true&PreventDeviceEncryption=true&ProcessAudit=true&ProcessAuditCommandLine=true&EffectsMode=Default&DesktopIconsMode=Default&StartFoldersMode=Default&CoreIsolationMode=Enabled&WifiMode=Interactive&ExpressSettings=DisableAll&LockKeysMode=Skip&StickyKeysMode=Default&ColorMode=Default&WallpaperMode=Default&LockScreenMode=Default&FirstLogonScript0=Set-ExecutionPolicy+Unrestricted+-Force%0D%0ASet-NetFirewallProfile+-Profile+Domain%2CPublic%2CPrivate+-Enabled+False%0D%0Awinrm+quickconfig+-quiet+-force%0D%0Awinrm+set+winrm%2Fconfig%2Fservice+%27%40%7BAllowUnencrypted%3D%22true%22%7D%27%0D%0Awinrm+set+winrm%2Fconfig%2Fservice%2Fauth+%27%40%7BBasic%3D%22true%22%7D%27%0D%0Awinrm+set+winrm%2Fconfig%2Fclient+%27%40%7BTrustedHosts%3D%22*%22%7D%27%0D%0ANew-NetFirewallRule+-Name+%27WinRM-HTTP%27+-DisplayName+%27WinRM+HTTP%27+-Enabled+True+-Direction+Inbound+-Protocol+TCP+-LocalPort+5985+-Action+Allow%0D%0ASet-Service+-Name+WinRM+-StartupType+Automatic%0D%0ARestart-Service+WinRM&FirstLogonScriptType0=Ps1&AppLockerMode=Skip-->
 	<settings pass="offlineServicing"></settings>
 	<settings pass="windowsPE">
 		<component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
@@ -19,7 +18,7 @@
 				</RunSynchronousCommand>
 				<RunSynchronousCommand wcm:action="add">
 					<Order>4</Order>
-					<Path>cmd.exe /c &gt;&gt;X:\pe.cmd (echo:if exist ^%^%d:\$OEM$ set ^"OEM_FOLDER=^%^%d:\$OEM$^"&amp;echo:if exist ^%^%d:\$WinPEDriver$ set ^"PEDRIVERS_FOLDER=^%^%d:\$WinPEDriver$^"&amp;echo:^))</Path>
+					<Path>cmd.exe /c &gt;&gt;X:\pe.cmd (echo:if exist ^%^%d:\$OEM$ set ^"OEM_FOLDER=^\%^\%d:\$OEM$^"&amp;echo:if exist ^%^%d:\$WinPEDriver$ set ^"PEDRIVERS_FOLDER=^\%^\%d:\$WinPEDriver$^"&amp;echo:^))</Path>
 				</RunSynchronousCommand>
 				<RunSynchronousCommand wcm:action="add">
 					<Order>5</Order>
@@ -109,11 +108,11 @@
 			<RunSynchronous>
 				<RunSynchronousCommand wcm:action="add">
 					<Order>1</Order>
-					<Path>powershell.exe -WindowStyle "Normal" -NoProfile -Command "$xml = [xml]::new(); $xml.Load('C:\Windows\Panther\unattend.xml'); $sb = [scriptblock]::Create( $xml.unattend.Extensions.ExtractScript ); Invoke-Command -ScriptBlock $sb -ArgumentList $xml;"</Path>
+					<Path>powershell.exe -WindowStyle "Normal" -NoProfile -Command "$xml = [xml]::new(); $xml.Load('C:\Windows\Panther\unattend.xml'); $sb = [scriptblock]::Create($xml.unattend.Extensions.ExtractScript); Invoke-Command -ScriptBlock $sb -ArgumentList $xml;"</Path>
 				</RunSynchronousCommand>
 				<RunSynchronousCommand wcm:action="add">
 					<Order>2</Order>
-					<Path>powershell.exe -WindowStyle "Normal" -ExecutionPolicy "Unrestricted" -NoProfile -File "C:\Windows\Setup\Scripts\Specialize.ps1"</Path>
+					<Path>powershell.exe -WindowStyle "Normal" -ExecutionPolicy "Bypass" -NoProfile -File "C:\Windows\Setup\Scripts\Specialize.ps1"</Path>
 				</RunSynchronousCommand>
 				<RunSynchronousCommand wcm:action="add">
 					<Order>3</Order>
@@ -121,7 +120,7 @@
 				</RunSynchronousCommand>
 				<RunSynchronousCommand wcm:action="add">
 					<Order>4</Order>
-					<Path>powershell.exe -WindowStyle "Normal" -ExecutionPolicy "Unrestricted" -NoProfile -File "C:\Windows\Setup\Scripts\DefaultUser.ps1"</Path>
+					<Path>powershell.exe -WindowStyle "Normal" -ExecutionPolicy "Bypass" -NoProfile -File "C:\Windows\Setup\Scripts\DefaultUser.ps1"</Path>
 				</RunSynchronousCommand>
 				<RunSynchronousCommand wcm:action="add">
 					<Order>5</Order>
@@ -147,7 +146,7 @@
 						<DisplayName>Administrator</DisplayName>
 						<Group>Administrators</Group>
 						<Password>
-							<Value>ChangeMe123!</Value>
+							<Value>${WINRM_PASSWORD}</Value>
 							<PlainText>true</PlainText>
 						</Password>
 					</LocalAccount>
@@ -165,9 +164,9 @@
 			<AutoLogon>
 				<Username>Admin</Username>
 				<Enabled>true</Enabled>
-				<LogonCount>1</LogonCount>
+				<LogonCount>3</LogonCount>
 				<Password>
-					<Value>ChangeMe123!</Value>
+					<Value>${WINRM_PASSWORD}</Value>
 					<PlainText>true</PlainText>
 				</Password>
 			</AutoLogon>
@@ -183,7 +182,7 @@
 			<FirstLogonCommands>
 				<SynchronousCommand wcm:action="add">
 					<Order>1</Order>
-					<CommandLine>powershell.exe -WindowStyle "Normal" -ExecutionPolicy "Unrestricted" -NoProfile -File "C:\Windows\Setup\Scripts\FirstLogon.ps1"</CommandLine>
+					<CommandLine>powershell.exe -WindowStyle "Normal" -ExecutionPolicy "Bypass" -NoProfile -File "C:\Windows\Setup\Scripts\unattend-01.ps1"</CommandLine>
 				</SynchronousCommand>
 			</FirstLogonCommands>
 		</component>
@@ -202,13 +201,9 @@ param(
 
 foreach( $file in $Document.unattend.Extensions.File ) {
     $path = [System.Environment]::ExpandEnvironmentVariables( $file.GetAttribute( 'path' ) );
-    mkdir -Path( $path | Split-Path -Parent ) -ErrorAction 'SilentlyContinue';
-    $encoding = switch( [System.IO.Path]::GetExtension( $path ) ) {
-        { $_ -in '.ps1', '.xml' } { [System.Text.Encoding]::UTF8; }
-        { $_ -in '.reg', '.vbs', '.js' } { [System.Text.UnicodeEncoding]::new( $false, $true ); }
-        default { [System.Text.Encoding]::Default; }
-    };
-    $bytes = $encoding.GetPreamble() + $encoding.GetBytes( $file.InnerText.Trim() );
+    New-Item -ItemType Directory -Path ( $path | Split-Path -Parent ) -Force -ErrorAction 'SilentlyContinue' | Out-Null;
+    $encoding = [System.Text.UTF8Encoding]::new( $false );
+    $bytes = $encoding.GetBytes( $file.InnerText.Trim() );
     [System.IO.File]::WriteAllBytes( $path, $bytes );
 }
 		</ExtractScript>
@@ -251,23 +246,47 @@ foreach( $file in $Document.unattend.Extensions.File ) {
 	&lt;Actions Context="Author"&gt;
 		&lt;Exec&gt;
 			&lt;Command&gt;C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe&lt;/Command&gt;
-			&lt;Arguments&gt;-WindowStyle Hidden -NoProfile -NonInteractive -Command "$format = 'yyyy-MM-ddTHH\:mm\:ssK'; $now = [datetime]::UtcNow; $start = $now.ToString($format); $end = $now.AddDays(7).ToString($format); $params = @{ LiteralPath = 'Registry::HKLM\Software\Microsoft\WindowsUpdate\UX\Settings'; Type = 'String'; Force = $true; Verbose = $true; }; 'PauseFeatureUpdatesStartTime', 'PauseQualityUpdatesStartTime', 'PauseUpdatesStartTime' | foreach { Set-ItemProperty @params -Name $_ -Value $start; }; 'PauseFeatureUpdatesEndTime', 'PauseQualityUpdatesEndTime', 'PauseUpdatesExpiryTime' | foreach { Set-ItemProperty @params -Name $_ -Value $end; };"&lt;/Arguments&gt;
+			&lt;Arguments&gt;-WindowStyle Hidden -NoProfile -NonInteractive -Command "$format = 'yyyy-MM-ddTHH\:mm\:ssK'; $now = [datetime]::UtcNow; $start = $now.ToString($format); $end =$now.AddDays(7).ToString($format);$params = @{ LiteralPath = 'Registry::HKLM\Software\Microsoft\WindowsUpdate\UX\Settings'; Type = 'String'; Force = $true; Verbose =$true; }; 'PauseFeatureUpdatesStartTime', 'PauseQualityUpdatesStartTime', 'PauseUpdatesStartTime' | foreach { Set-ItemProperty @params -Name $_ -Value$start; }; 'PauseFeatureUpdatesEndTime', 'PauseQualityUpdatesEndTime', 'PauseUpdatesExpiryTime' | foreach { Set-ItemProperty @params -Name $_ -Value$end; };"&lt;/Arguments&gt;
 		&lt;/Exec&gt;
 	&lt;/Actions&gt;
 &lt;/Task&gt;
 		</File>
 		<File path="C:\Windows\Setup\Scripts\unattend-01.ps1">
+Start-Transcript -Path "C:\Windows\Temp\unattend-01.log" -Append
 Set-ExecutionPolicy Unrestricted -Force
-Set-NetConnectionProfile -NetworkCategory Private
-Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+
+# Ag bagdastiricisi hazir olana kadar bekle
+for ($i = 0; $i -lt 15; $i++) {
+    $adapter = Get-NetAdapter | Where-Object { $_.Name -like 'Ethernet*' } | Select-Object -First 1
+    if (-not $adapter) { $adapter = Get-NetAdapter | Select-Object -First 1 }
+    if ($adapter) { break }
+    Start-Sleep -Seconds 2
+}
+
+$ifIndex = $adapter.InterfaceIndex
+Remove-NetIPAddress -InterfaceIndex $ifIndex -Confirm:$false -ErrorAction SilentlyContinue
+Remove-NetRoute -InterfaceIndex $ifIndex -Confirm:$false -ErrorAction SilentlyContinue
+New-NetIPAddress -InterfaceIndex $ifIndex -IPAddress 192.168.10.11 -PrefixLength 24 -DefaultGateway 192.168.10.254 -ErrorAction SilentlyContinue
+Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses ("192.168.10.10", "192.168.10.254") -ErrorAction SilentlyContinue
+
+Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False -ErrorAction SilentlyContinue
+
 reg.exe add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v LocalAccountTokenFilterPolicy /t REG_DWORD /d 1 /f
-winrm quickconfig -quiet -force
-winrm set winrm/config/service '@{AllowUnencrypted="true"}'
-winrm set winrm/config/service/auth '@{Basic="true"}'
-winrm set winrm/config/client '@{TrustedHosts="*"}'
-New-NetFirewallRule -Name 'WinRM-HTTP' -DisplayName 'WinRM HTTP' -Enabled True -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow
+reg.exe add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v EnableLUA /t REG_DWORD /d 0 /f
+
 Set-Service -Name WinRM -StartupType Automatic
-Restart-Service WinRM
+Start-Service -Name WinRM -ErrorAction SilentlyContinue
+Enable-PSRemoting -SkipNetworkProfileCheck -Force
+Set-Item -Path WSMan:\localhost\Service\AllowUnencrypted -Value $true -Force
+Set-Item -Path WSMan:\localhost\Service\Auth\Basic -Value $true -Force
+Set-Item -Path WSMan:\localhost\Client\TrustedHosts -Value "*" -Force
+cmd.exe /c 'winrm set winrm/config/service @{AllowUnencrypted="true"}'
+cmd.exe /c 'winrm set winrm/config/service/auth @{Basic="true"}'
+
+netsh advfirewall firewall add rule name="WinRM-5985" dir=in action=allow protocol=TCP localport=5985
+Restart-Service WinRM -Force
+Stop-Transcript
 		</File>
 		<File path="C:\Windows\Setup\Scripts\Specialize.ps1">
 $scripts = @(
@@ -294,7 +313,7 @@ $scripts = @(
 		reg.exe add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit" /v ProcessCreationIncludeCmdLine_Enabled /t REG_DWORD /d 1 /f;
 	};
 	{
-		Set-ExecutionPolicy -Scope 'LocalMachine' -ExecutionPolicy 'RemoteSigned' -Force;
+		Set-ExecutionPolicy -Scope 'LocalMachine' -ExecutionPolicy 'Unrestricted' -Force;
 	};
 	{
 		reg.exe add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power" /v HiberbootEnabled /t REG_DWORD /d 0 /f;
@@ -309,13 +328,8 @@ $scripts = @(
   [float] $increment = 100 / $scripts.Count;
   foreach( $script in $scripts ) {
     Write-Progress -Id 0 -Activity 'Running scripts to customize your Windows installation. Do not close this window.' -PercentComplete $complete;
-    '*** Will now execute command &#xAB;{0}&#xBB;.' -f $(
-      $script.ToString().Trim() -replace '\s+', ' ' -replace '^(.{99})(.+)$', '$1&#x2026;';
-    );
     $start = [datetime]::Now;
     &amp; $script;
-    '*** Finished executing command after {0:0} ms.' -f [datetime]::Now.Subtract( $start ).TotalMilliseconds;
-    "`r`n" * 3;
     $complete += $increment;
   }
 } *&gt;&amp;1 | Out-String -Width 1KB -Stream &gt;&gt; "C:\Windows\Setup\Scripts\Specialize.log";
@@ -334,50 +348,11 @@ $scripts = @(
   [float] $complete = 0;
   [float] $increment = 100 / $scripts.Count;
   foreach( $script in $scripts ) {
-    Write-Progress -Id 0 -Activity 'Running scripts to modify the default user&#x2019;&#x2019;s registry hive. Do not close this window.' -PercentComplete $complete;
-    '*** Will now execute command &#xAB;{0}&#xBB;.' -f $(
-      $script.ToString().Trim() -replace '\s+', ' ' -replace '^(.{99})(.+)$', '$1&#x2026;';
-    );
     $start = [datetime]::Now;
     &amp; $script;
-    '*** Finished executing command after {0:0} ms.' -f [datetime]::Now.Subtract( $start ).TotalMilliseconds;
-    "`r`n" * 3;
     $complete += $increment;
   }
 } *&gt;&amp;1 | Out-String -Width 1KB -Stream &gt;&gt; "C:\Windows\Setup\Scripts\DefaultUser.log";
-		</File>
-		<File path="C:\Windows\Setup\Scripts\FirstLogon.ps1">
-$scripts = @(
-	{
-		Set-ItemProperty -LiteralPath 'Registry::HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon' -Name 'AutoLogonCount' -Type 'DWord' -Force -Value 0;
-	};
-	{
-		&amp; 'C:\Windows\Setup\Scripts\unattend-01.ps1';
-	};
-	{
-		Remove-Item -LiteralPath @(
-		  'C:\Windows\Panther\unattend.xml';
-		  'C:\Windows\Panther\unattend-original.xml';
-		  'C:\Windows\Setup\Scripts\Wifi.xml';
-		) -Force -ErrorAction 'SilentlyContinue' -Verbose;
-	};
-);
-
-&amp; {
-  [float] $complete = 0;
-  [float] $increment = 100 / $scripts.Count;
-  foreach( $script in $scripts ) {
-    Write-Progress -Id 0 -Activity 'Running scripts to finalize your Windows installation. Do not close this window.' -PercentComplete $complete;
-    '*** Will now execute command &#xAB;{0}&#xBB;.' -f $(
-      $script.ToString().Trim() -replace '\s+', ' ' -replace '^(.{99})(.+)$', '$1&#x2026;';
-    );
-    $start = [datetime]::Now;
-    &amp; $script;
-    '*** Finished executing command after {0:0} ms.' -f [datetime]::Now.Subtract( $start ).TotalMilliseconds;
-    "`r`n" * 3;
-    $complete += $increment;
-  }
-} *&gt;&amp;1 | Out-String -Width 1KB -Stream &gt;&gt; "C:\Windows\Setup\Scripts\FirstLogon.log";
 		</File>
 	</Extensions>
 </unattend>

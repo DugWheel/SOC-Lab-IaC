@@ -1,4 +1,35 @@
+# --- Lab VMs / build artifacts (generated) ---
 vms/
+*.vmx
+*.vmdk
+*.vmsd
+*.vmsn
+*.vmss
+*.nvram
+*.lck/
+vmware.log
+
+# --- Packer ---
+.packer_cache/
+packer/**/output-*/
+*.box
+
+# --- ISO media ---
 packer/*/iso/*.iso
 packer/*/iso/*.gz
+vms/**/*.iso
+
+# --- Secrets / environment ---
 .env
+.env.bak
+*.bak
+*.bak.*
+
+*.swp
+*.swo
+
+__pycache__/
+*.pyc
+*.retry
+.ansible/
+

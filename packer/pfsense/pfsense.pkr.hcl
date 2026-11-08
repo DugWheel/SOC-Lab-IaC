@@ -7,29 +7,14 @@ packer {
   }
 }
 
-# IMPORTANT CHANGE: pfSense is now distributed not as a classic single-file ISO,
-# but with the "Netgate Installer" (e.g., netgate-installer-v1.2-
-# RELEASE-amd64.iso.gz). This installer connects to the internet and downloads pfSense
-# packages, meaning the ISO itself is small (~327MB), but
-# the installation can take longer as it pulls data from the internet, and
-# the VM's WAN adapter needs to be operational during installation.
-#
-# Before use: decompress the downloaded file with gunzip
-#   gunzip netgate-installer-v1.2-RELEASE-amd64.iso.gz
-# and place the resulting .iso file into the 'iso/' subdirectory of this folder.
-
 variable "iso_url" {
   type    = string
-  default = "./iso/netgate-installer-v1.2-RELEASE-amd64.iso"
+  default = "./iso/pfSense-CE-2.7.2-RELEASE-amd64.iso"
 }
 
-variable "winrm_password" {
-  type    = string
-  default = ""
-}
 variable "iso_checksum" {
   type    = string
-  default = "none" # Obtain from Netgate's "pfSense Plus Installer Checksums" page (calculated from the .gz file)
+  default = "none"
 }
 
 variable "lan_vmnet" {
@@ -52,38 +37,52 @@ source "vmware-iso" "pfsense" {
   memory        = 1024
   disk_size     = 8192
 
+  # Primary adapter (ethernet0) becomes em0 (WAN)
   network_adapter_type = "e1000"
 
-  # The Netgate Installer also lacks an official answer-file mechanism,
-  # WinRM/SSH cannot be used as a communicator, hence "none" and
-  # key press simulation via boot_command.
-  # Packer will not shut down the machine; it will wait up to 1 hour for SSH to become available.
+  # Mount docs/config-pfSense.xml as /conf/config.xml on secondary CD-ROM
+  cd_content = {
+    "/conf/config.xml" = file("../../docs/config-pfSense.xml")
+  }
+  cd_label = "PFSENSE_CFG"
+
   communicator = "ssh"
+  ssh_host     = "192.168.10.254"
   ssh_username = "admin"
   ssh_password = "pfsense"
-  ssh_timeout  = "1h"
+  ssh_timeout  = "20m"
   ssh_port     = 22
-  
-  boot_wait = "5s"
-  boot_command = []
 
-  # Once the installation is complete and SSH is enabled, Packer will use this command to cleanly shut down the system
-  shutdown_command = "halt -p"
+  # Wait 12s for the FreeBSD boot menu, then press Enter immediately
+  boot_wait = "12s"
+
+  boot_command = [
+    "<enter><wait35s>",                # Boot menu -> Boot immediately, wait 35s for Copyright screen
+    "<enter><wait3s>",                 # 1. Copyright notice -> Accept
+    "<enter><wait3s>",                 # 2. Welcome to pfSense -> Install pfSense
+    "<enter><wait3s>",                 # 3. Keymap Selection -> Continue with default keymap
+    "<enter><wait3s>",                 # 4. Partitioning -> Auto (ZFS)
+    "<enter><wait3s>",                 # 5. ZFS Configuration -> Proceed with Installation                 # 6. ZFS Pool Type -> stripe
+    "<spacebar><enter><wait3s>",       # 7. Disk Selection -> Spacebar selects [*] da0, Enter continues
+    "<left><enter><wait45s>",          # 8. Confirm disk wipe -> Left selects YES, Enter starts extraction (wait 45s)
+    "<enter>"                          # 9. Complete (Reboot / Shell) -> Enter selects Reboot
+  ]
+
+  shutdown_command = "16\ny\n"
 
   output_directory = "../../vms/pfsense"
 
   vmx_data = {
-    "ethernet0.present"          = "TRUE"
-    "ethernet0.connectionType"   = "nat"
-    "ethernet1.present"          = "TRUE"
-    "ethernet1.connectionType"   = "custom"
-    "ethernet1.vnet"             = "${var.lan_vmnet}"
-    "ethernet2.present"          = "TRUE"
-    "ethernet2.connectionType"   = "custom"
-    "ethernet2.vnet"             = "${var.dmz_vmnet}"
-    "RemoteDisplay.vnc.enabled"  = "TRUE"
-    "RemoteDisplay.vnc.port"     = "5900"
-    "bios.bootOrder"             = "CDROM,HDD,FLOPPY"
+    "ethernet0.present"        = "TRUE"
+    "ethernet0.connectionType" = "nat"
+    # ethernet1 and ethernet2 default to vlance (le0 and le1 in FreeBSD), matching config-pfSense.xml!
+    "ethernet1.present"        = "TRUE"
+    "ethernet1.connectionType" = "custom"
+    "ethernet1.vnet"           = "${var.lan_vmnet}"
+    "ethernet2.present"        = "TRUE"
+    "ethernet2.connectionType" = "custom"
+    "ethernet2.vnet"           = "${var.dmz_vmnet}"
+    "bios.bootOrder"           = "hdd,cdrom"
   }
 }
 
