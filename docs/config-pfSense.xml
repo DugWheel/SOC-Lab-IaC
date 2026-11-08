@@ -38,6 +38,7 @@
 			<protocol>https</protocol>
 			<loginautocomplete></loginautocomplete>
 			<ssl-certref>6a70cb1024f2b</ssl-certref>
+			<dashboardcolumns>2</dashboardcolumns>
 		</webgui>
 		<disablenatreflection>yes</disablenatreflection>
 		<disablesegmentationoffloading></disablesegmentationoffloading>
@@ -54,6 +55,9 @@
 		<ssh>
 			<enable>enabled</enable>
 		</ssh>
+		<acb>
+			<device_key>8def6cbb03fe62608f2cf74150e3c64313b0c05d2655c587a2351ad2da8d47c8</device_key>
+		</acb>
 	</system>
 	<interfaces>
 		<wan>
@@ -76,7 +80,7 @@
 			<lan></lan>
 			<if>le0</if>
 			<enable></enable>
-			<ipaddr>192.168.10.1</ipaddr>
+			<ipaddr>192.168.10.254</ipaddr>
 			<subnet>24</subnet>
 			<gateway></gateway>
 			<ipaddrv6></ipaddrv6>
@@ -88,20 +92,60 @@
 			<if>le1</if>
 			<descr><![CDATA[DMZ]]></descr>
 			<enable></enable>
-			<ipaddr>192.168.20.1</ipaddr>
+			<ipaddr>192.168.20.254</ipaddr>
 			<subnet>24</subnet>
 			<spoofmac></spoofmac>
+			<gateway></gateway>
+			<ipaddrv6></ipaddrv6>
+			<subnetv6></subnetv6>
+			<gatewayv6></gatewayv6>
 		</opt1>
 	</interfaces>
 	<staticroutes></staticroutes>
 	<dhcpd>
 		<lan>
-			<enable></enable>
 			<range>
 				<from>192.168.10.10</from>
 				<to>192.168.10.100</to>
 			</range>
 		</lan>
+		<opt1>
+			<range>
+				<from>192.168.20.10</from>
+				<to>192.168.20.100</to>
+			</range>
+			<failover_peerip></failover_peerip>
+			<dnsregpolicy></dnsregpolicy>
+			<earlydnsregpolicy></earlydnsregpolicy>
+			<defaultleasetime></defaultleasetime>
+			<maxleasetime></maxleasetime>
+			<netmask></netmask>
+			<gateway></gateway>
+			<domain></domain>
+			<domainsearchlist></domainsearchlist>
+			<ddnsdomain></ddnsdomain>
+			<ddnsdomainprimary></ddnsdomainprimary>
+			<ddnsdomainprimaryport></ddnsdomainprimaryport>
+			<ddnsdomainsecondary></ddnsdomainsecondary>
+			<ddnsdomainsecondaryport></ddnsdomainsecondaryport>
+			<ddnsdomainkeyname></ddnsdomainkeyname>
+			<ddnsdomainkeyalgorithm>hmac-md5</ddnsdomainkeyalgorithm>
+			<ddnsdomainkey></ddnsdomainkey>
+			<mac_allow></mac_allow>
+			<mac_deny></mac_deny>
+			<ddnsclientupdates>allow</ddnsclientupdates>
+			<tftp></tftp>
+			<ldap></ldap>
+			<nextserver></nextserver>
+			<filename></filename>
+			<filename32></filename32>
+			<filename64></filename64>
+			<filename32arm></filename32arm>
+			<filename64arm></filename64arm>
+			<uefihttpboot></uefihttpboot>
+			<rootpath></rootpath>
+			<numberoptions></numberoptions>
+		</opt1>
 	</dhcpd>
 	<dhcpdv6>
 		<lan>
@@ -358,9 +402,9 @@
 	<vlans></vlans>
 	<qinqs></qinqs>
 	<revision>
-		<time>1787079406</time>
-		<description><![CDATA[admin@192.168.10.254 (Local Database): Firewall: Rules - saved/edited a firewall rule.]]></description>
-		<username><![CDATA[admin@192.168.10.254 (Local Database)]]></username>
+		<time>1792014770</time>
+		<description><![CDATA[admin@192.168.10.1 (Local Database): Generated new randomized AutoConfigBackup device key]]></description>
+		<username><![CDATA[admin@192.168.10.1 (Local Database)]]></username>
 	</revision>
 	<gateways>
 		<gateway_item>

@@ -3,15 +3,16 @@
 ![Tested With Packer](https://img.shields.io/badge/Tested_With_Packer-1.10+-blue)
 ![Tested With Ansible](https://img.shields.io/badge/Tested_With_Ansible-2.15+-red)
 ![VMware](https://img.shields.io/badge/VMware-Workstation_Pro-green)
+![Wazuh](https://img.shields.io/badge/SIEM-Wazuh_4.7-00a9e0)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-An Infrastructure-as-Code driven SOC lab for a Linux Fedora host running VMware Workstation Pro. It builds a segmented and isolated security environment behind a pfSense firewall, provisions an Active Directory domain populated with synthetic adversarial data via **BadBlood**, and deploys endpoint telemetry and detection tooling with **Sysmon** and **CrowdSec**.
+An automated Infrastructure-as-Code (IaC) SOC and Purple Team lab built for a Fedora Linux host running VMware Workstation Pro. It automatically builds a segmented security environment behind a **pfSense** firewall, provisions an Active Directory domain populated with synthetic adversarial data via **BadBlood**, deploys endpoint telemetry and behavioral defense with **Sysmon** and **CrowdSec**, and centralizes detection engineering on a dedicated **Wazuh SIEM** server in the DMZ. It also integrates a **Kali Linux** attacker VM (Bring Your Own VM) on the LAN for end-to-end Active Directory attack simulations.
 
-The entire lab is orchestrated through a single `setup.sh` workflow, with Ansible handling post-install configuration and Packer handling Windows Server image provisioning.
+The entire lab is orchestrated through a single `./setup.sh` workflow: **Packer** handles unattended image provisioning (pfSense, Windows Server 2022, and Ubuntu Server for Wazuh), `create-win11-vm.sh` handles Windows 11 unattended installation, and **Ansible** handles all post-install domain, SACL auditing, telemetry, and custom SIEM rule configurations.
 
 ![Network Topology](docs/soc-lab-network-topology.png)
 
-> ** Lab Environment Only**
+> **Lab Environment Only**
 >
 > This project is designed to run inside an isolated VMware environment for security research, detection engineering, and SOC practice. Do not expose the Windows/Active Directory lab networks directly to untrusted networks or the public Internet. The generated Active Directory data is intentionally synthetic and adversarial-looking.
 
@@ -21,15 +22,22 @@ The entire lab is orchestrated through a single `setup.sh` workflow, with Ansibl
 
 * [Overview](#overview)
   * [Core Components](#core-components)
+* [Purple Team Walkthrough & Detection Engineering](#purple-team-walkthrough--detection-engineering)
 * [Architecture](#architecture)
+  * [Machines](#machines)
+  * [Network Flow](#network-flow)
 * [Lab Workflow](#lab-workflow)
 * [Prerequisites](#prerequisites)
   * [Download Required ISO Files](#download-required-iso-files)
 * [Directory Structure](#directory-structure)
 * [Quick Start](#quick-start)
-  * [pfSense Installation](#pfsense-installation)
 * [What's Actually Configured](#whats-actually-configured)
-  * [DMZ / Future SIEM](#dmz--future-siem)
+  * [pfSense Firewall Configuration](#pfsense-firewall-configuration)
+  * [Active Directory & BadBlood](#active-directory--badblood)
+  * [Ansible Playbooks](#ansible-playbooks)
+  * [Sysmon & CrowdSec](#sysmon--crowdsec)
+  * [Wazuh SIEM & Custom Detection Rules](#wazuh-siem--custom-detection-rules)
+  * [Kali Attacker VM (BYOVM)](#kali-attacker-vm-byovm)
 * [Known Limitations](#known-limitations)
 * [Troubleshooting](#troubleshooting)
 * [Teardown](#teardown)
@@ -39,54 +47,63 @@ The entire lab is orchestrated through a single `setup.sh` workflow, with Ansibl
 
 ## Overview
 
-**SOC-Lab-IaC** is a reproducible blue-team/security operations lab designed for:
+**SOC-Lab-IaC** is a reproducible blue-team and purple-team security operations lab designed for:
 
-* Windows and Active Directory security monitoring
-* Detection engineering
-* Endpoint telemetry collection
-* Attack-surface simulation
-* SOC tooling experimentation
-* Network segmentation and firewall testing
-* Security automation with Ansible
-* Infrastructure provisioning with Packer
-
-The lab creates a realistic Windows enterprise-style environment while keeping the components isolated inside VMware Workstation.
+* Windows and Active Directory security monitoring (`Event ID 4624`, `4625`, `4662`, `4720`, `4724`, `4738`, `4768`, `4769`, `5136`)
+* Centralized log collection, threat hunting, and SIEM analysis with Wazuh
+* Custom detection engineering (`docs/local_rules.xml`) mapped to MITRE ATT&CK
+* Endpoint telemetry collection with Sysmon (`Event ID 1`, `10`, etc.) and behavioral defense with CrowdSec
+* Active Directory attack path simulation (BloodHound, `bloodyAD`, Impacket, NetExec)
+* Network segmentation and firewall rule testing across LAN and DMZ
+* Zero-touch security automation with Packer and Ansible
 
 ### Core Components
 
-| Component                  | Purpose                                           |
-| -------------------------- | ------------------------------------------------- |
-| **pfSense**                | Firewall, router, and network segmentation        |
-| **Windows Server 2022**    | Active Directory Domain Controller                |
-| **Windows 11 Enterprise**  | Domain-joined workstation                         |
-| **BadBlood**               | Synthetic/adversarial Active Directory population |
-| **Sysmon**                 | Process, network, and filesystem telemetry        |
-| **CrowdSec**               | Log-based behavioral detection and remediation    |
-| **Ansible**                | Post-install configuration and orchestration      |
-| **Packer**                 | Windows Server image provisioning                 |
-| **VMware Workstation Pro** | Virtualization platform                           |
+| Component                  | Purpose                                                              |
+| -------------------------- | -------------------------------------------------------------------- |
+| **pfSense CE 2.7.2**       | Firewall, router, and LAN/DMZ network segmentation                   |
+| **Windows Server 2022**    | Active Directory Domain Controller (`soclab.local`)                  |
+| **Windows 11 Enterprise**  | Domain-joined workstation endpoint                                   |
+| **Wazuh SIEM (Ubuntu)**    | Centralized SIEM, log aggregation, and XDR platform in the DMZ       |
+| **BadBlood**               | Synthetic/adversarial Active Directory population                    |
+| **Sysmon**                 | Process, network, and LSASS memory access endpoint telemetry         |
+| **CrowdSec**               | Log-based behavioral detection and host firewall remediation         |
+| **Kali Linux (Optional)**  | Bring-Your-Own attacker VM on the LAN for purple-team simulations    |
+| **Packer**                 | Unattended VM image provisioning (pfSense, Windows Server, Ubuntu)   |
+| **Ansible**                | Post-install configuration and SIEM/agent orchestration              |
+| **VMware Workstation Pro** | Host virtualization platform                                         |
+
+---
+
+## Purple Team Walkthrough & Detection Engineering
+
+This repository includes full documentation covering both offensive execution from Kali Linux and defensive telemetry/rule engineering in Wazuh:
+
+* **[Active Directory Purple Team Walkthrough (`docs/pentest.md`)](docs/pentest.md):** Step-by-step offensive execution and real-time Wazuh alerts for SMB Password Spraying & Brute Force, BloodHound ACL Abuse Chains (`GenericAll` password resets), AS-REP Roasting, Targeted Kerberoasting, Shadow Credentials (`msDS-KeyCredentialLink`), DCSync Replication, Pass-the-Hash (`wmiexec`), and LSASS Memory Dumping (`comsvcs.dll`).
+* **[Detection Engineering & Architecture Notes (`docs/purple-team-notes.md`)](docs/purple-team-notes.md):** Deep dive into the custom Wazuh detection ruleset (`100010`–`100080`), Active Directory SACL auditing requirements, event correlation logic, and troubleshooting lessons learned.
+* **[Custom Wazuh Ruleset (`docs/local_rules.xml`)](docs/local_rules.xml):** Production-ready custom XML rules deployed automatically to `/var/ossec/etc/rules/local_rules.xml`.
 
 ---
 
 ## Architecture
 
-The lab is divided into separate VMware virtual networks.
+The lab is segmented into three VMware virtual networks:
 
-| Zone    | vmnet  | Subnet            | Purpose                                   |
-| ------- | ------ | ----------------- | ----------------------------------------- |
-| **WAN** | vmnet8 | DHCP              | Host's internet connection                |
-| **LAN** | vmnet2 | `192.168.10.0/24` | Windows/AD network                        |
-| **DMZ** | vmnet3 | `192.168.20.0/24` | Reserved for future SIEM deployment       |
+| Zone    | vmnet  | Subnet            | Host Adapter IP | pfSense Gateway  | Purpose                                   |
+| ------- | ------ | ----------------- | --------------- | ---------------- | ----------------------------------------- |
+| **WAN** | vmnet8 | DHCP (`172.16.x`) | Auto (NAT)      | DHCP             | Host's internet connection                |
+| **LAN** | vmnet2 | `192.168.10.0/24` | `192.168.10.1`  | `192.168.10.254` | Windows AD network + Kali attacker        |
+| **DMZ** | vmnet3 | `192.168.20.0/24` | `192.168.20.1`  | `192.168.20.254` | Isolated Wazuh SIEM & monitoring network  |
 
 ### Machines
 
-| Machine               | Role                                    | IP              |
-| --------------------- | --------------------------------------- | --------------- |
-| **pfSense-fw**        | Firewall / Router                       | `192.168.10.1`  |
-| **winserver-ad**      | Windows Server 2022 / Domain Controller | `192.168.10.11` |
-| **win11-workstation** | Windows 11 / Domain-joined endpoint     | `192.168.10.10` |
-
-The Windows hosts run **Sysmon** and **CrowdSec** for endpoint telemetry and detection.
+| Machine               | Role                                    | Network         | IP                                   | Provisioning Method                              |
+| --------------------- | --------------------------------------- | --------------- | ------------------------------------ | ------------------------------------------------ |
+| **pfSense-fw**        | Firewall / Router (LAN + DMZ gateway)   | WAN / LAN / DMZ | `192.168.10.254` / `192.168.20.254`  | Packer (`pfsense.pkr.hcl` + ECI XML)             |
+| **winserver-ad**      | Windows Server 2022 / Domain Controller | LAN (`vmnet2`)  | `192.168.10.10`                      | Packer (`winserver.pkr.hcl`)                     |
+| **win11-workstation** | Windows 11 / Domain-joined endpoint     | LAN (`vmnet2`)  | `192.168.10.11`                      | Bash + `autounattend.xml` (`create-win11-vm.sh`) |
+| **wazuh-siem**        | Ubuntu Server 22.04 / Wazuh SIEM        | DMZ (`vmnet3`)  | `192.168.20.10`                      | Packer (`wazuh.pkr.hcl` + Cloud-Init)            |
+| **kali-attacker**     | Kali Linux / Offensive testing          | LAN (`vmnet2`)  | `192.168.10.20`                      | Optional / Bring Your Own VM                     |
 
 ### Network Flow
 
@@ -100,136 +117,129 @@ The Windows hosts run **Sysmon** and **CrowdSec** for endpoint telemetry and det
                             ▼
                      ┌──────────────┐
                      │   pfSense    │
-                     │  Firewall    │
+                     │   Firewall   │
                      └──────┬───────┘
                             │
               ┌─────────────┴─────────────┐
               │                           │
               ▼                           ▼
        VMware vmnet2                VMware vmnet3
-       192.168.10.0/24             192.168.20.0/24
+      192.168.10.0/24              192.168.20.0/24
+     GW: 192.168.10.254           GW: 192.168.20.254
               │                           │
-      ┌───────┴────────┐             Reserved for
-      │                │             future SIEM
-      ▼                ▼
- Windows Server     Windows 11
- 192.168.10.11     192.168.10.10
-      │                │
-      └───────┬────────┘
-              │
-              ▼
-       soclab.local AD
-              │
-      ┌───────┴────────┐
-      │                │
-      ▼                ▼
-   Sysmon           CrowdSec
+      ┌───────┼──────────┐                ▼
+      │       │          │         ┌────────────┐
+      ▼       ▼          ▼         │   Wazuh    │
+   Windows Windows     Kali        │    SIEM    │
+   Server    11      Attacker      │ (Ubuntu)   │
+     .10     .11    .20 (BYOVM)    │192.168.20.10│
+      │       │                    └─────▲──────┘
+      └───────┼──────────┐               │
+              │          │         Sysmon & AD Security
+              ▼          │         telemetry (Wazuh Agents:
+       soclab.local AD   │          1514/1515 TCP)
+              │          │               │
+      ┌───────┴────────┐ │               │
+      │                │ │               │
+      ▼                ▼ ▼               │
+   Sysmon ─────────────┴─────────────────┘
+      │
+      ▼
+   CrowdSec
 ```
+
+---
+
 ## Lab Workflow
 
-The complete deployment follows this general workflow:
+The complete deployment runs end-to-end without manual intervention:
 
 ```text
-   setup.sh
+   ./setup.sh
        │
        ▼
-Configure VMware VMnets
+Configure VMware VMnets (vmnet2 LAN, vmnet3 DMZ)
        │
        ▼
-Create & install pfSense
+1/4 Build & start pfSense (Packer + automated config-pfSense.xml import)
        │
        ▼
-Build Windows Server 2022
+2/4 Build & start Windows Server 2022 (Packer + autounattend.xml)
        │
        ▼
-Create Windows 11 VM
+3/4 Create & start Windows 11 VM (create-win11-vm.sh + answer.iso)
        │
        ▼
-Ansible configuration
-       │
-       ├──► Promote Windows Server to DC
-       │
-       ├──► Populate AD with BadBlood
-       │
-       ├──► Join Windows 11 to domain
-       │
-       ├──► Install/configure Sysmon
-       │
-       └──► Install/configure CrowdSec
+4/4 Build & start Wazuh Ubuntu Server in DMZ (Packer + Cloud-Init + Netplan)
        │
        ▼
-   SOC Lab Ready
+Discover Windows WinRM IPs & generate ansible/inventory/hosts.ini
        │
        ▼
-Detection / Monitoring / Security Testing
+Execute Ansible Playbooks
+       │
+       ├──► 02-ad-domain.yml        (Promote Windows Server to DC)
+       ├──► 03-badblood.yml         (Populate AD with BadBlood)
+       ├──► 04-workstation-join.yml (Join Windows 11 to soclab.local)
+       ├──► 05-sysmon.yml           (Install/configure Sysmon)
+       ├──► 06-crowdsec.yml         (Install/configure CrowdSec)
+       └──► 07-wazuh.yml            (Deploy Wazuh SIEM & enroll Windows agents)
+       │
+       ▼
+   SOC Lab Ready!
 ```
+
+---
+
 ## Prerequisites
 
 ### Host Requirements
 
 * Fedora Linux or compatible Linux distribution
 * VMware Workstation Pro installed and available in `PATH`
-* **16 GB+ RAM**
-* **80 GB+ free disk space**
-* Internet connection for downloading required software/dependencies
+* **16 GB+ RAM** (32 GB recommended when running all 4 core VMs + Kali simultaneously)
+* **120 GB+ free disk space**
+* Active internet connection
 
 ### Required Tools
 
-The following tools must be installed:
+Ensure the following packages and binaries are installed on your Fedora host:
 
 * `packer`
-* `ansible-playbook`
-* `genisoimage`
-* `vmware-vdiskmanager`
-* VMware Workstation Pro utilities
+* `ansible-playbook` (and `python3-winrm`)
+* `sshpass` (`sudo dnf install sshpass` — required for Ansible SSH authentication to the Wazuh server)
+* `genisoimage` or `xorriso` (`sudo dnf install genisoimage xorriso` — required for unattended answer ISOs)
+* `vmware-vdiskmanager` and `vmrun` (bundled with VMware Workstation Pro)
 
-Run:
+Run `./check_prereqs.sh` at any time to validate your environment before building:
 
 ```bash
 ./check_prereqs.sh
 ```
- at any time to verify:
-* Required tools
-* Required ISO files
-* Available RAM
-* Available disk space
-* VMware VMnet configuration
 
 ---
 
 ## Download Required ISO Files
 
-Due to licensing restrictions, the required operating system ISOs must be downloaded manually and placed in their respective directories before starting the orchestration.
+Download the following installation media and place them in their corresponding Packer `iso/` directories before running `./setup.sh`:
 
-| Operating System          | Download                                                                                                 | Target Directory                  | Notes                                                                |
-| ------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------- | -------------------------------------------------------------------- |
-| **pfSense CE**            | [Netgate Download](https://www.pfsense.org/download/)                                                    | `packer/pfsense/iso/`             | Select `amd64` → `DVD Image (ISO)`. Extract the `.gz` archive first. |
-| **Windows Server 2022**   | [Microsoft Evaluation Center](https://www.microsoft.com/en-us/evalcenter/evaluate-windows-server-2022)   | `packer/windows-server-2022/iso/` | Use the 180-day Evaluation ISO.                                      |
-| **Windows 11 Enterprise** | [Microsoft Evaluation Center](https://www.microsoft.com/en-us/evalcenter/evaluate-windows-11-enterprise) | `packer/windows-11/iso/`          | Use the 90-day Evaluation ISO.                                       |
+| Operating System          | Download Source                                                                                          | Target Directory                  | Notes                                                                                      |
+| ------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------ |
+| **pfSense CE 2.7.2**      | [Netgate Official Mirror](https://atxfiles.netgate.com/mirror/downloads/pfSense-CE-2.7.2-RELEASE-amd64.iso.gz) | `packer/pfsense/iso/`   | Use the classic **Offline DVD ISO** (`pfSense-CE-2.7.2-RELEASE-amd64.iso.gz`) and `gunzip` it. |
+| **Windows Server 2022**   | [Microsoft Evaluation Center](https://www.microsoft.com/en-us/evalcenter/evaluate-windows-server-2022) | `packer/windows-server-2022/iso/` | 180-day Evaluation ISO (64-bit English).                                         |
+| **Windows 11 Enterprise** | [Microsoft Evaluation Center](https://www.microsoft.com/en-us/evalcenter/evaluate-windows-11-enterprise) | `packer/windows-11/iso/` | 90-day Evaluation ISO. Keep **only one** `.iso` file in this directory.          |
+| **Ubuntu Server 22.04**   | [Ubuntu Releases](https://releases.ubuntu.com/22.04/)                                                    | `packer/wazuh/iso/`               | Live Server (`ubuntu-22.04.5-live-server-amd64.iso`) for the Wazuh SIEM node.              |
 
-### pfSense ISO
+### Quick Download for pfSense CE 2.7.2 Offline ISO
 
-The pfSense download is provided as a compressed archive in some distributions.
-
-Extract it before use:
+Netgate's main store page distributes the online installer by default. For reliable zero-touch Packer automation, download the offline CE 2.7.2 ISO directly into `packer/pfsense/iso/`:
 
 ```bash
-gunzip pfsense.iso.gz
+cd packer/pfsense/iso/
+curl -LO [https://atxfiles.netgate.com/mirror/downloads/pfSense-CE-2.7.2-RELEASE-amd64.iso.gz](https://atxfiles.netgate.com/mirror/downloads/pfSense-CE-2.7.2-RELEASE-amd64.iso.gz)
+gunzip pfSense-CE-2.7.2-RELEASE-amd64.iso.gz
+cd ../../..
 ```
-
-### ISO Detection
-
-For Windows 11, the automation automatically detects the ISO file.
-
-Make sure there is **exactly one** `.iso` file in:
-
-```text
-packer/windows-11/iso/
-```
-
-For Windows Server 2022, ensure the ISO filename matches the `iso_url` variable in the relevant `.pkr.hcl` file.
-
-Alternatively, edit the `.pkr.hcl` file to match your downloaded ISO filename.
 
 ---
 
@@ -239,7 +249,7 @@ Alternatively, edit the `.pkr.hcl` file to match your downloaded ISO filename.
 .
 ├── ansible/
 │   ├── ansible.cfg
-│   ├── requirements.yml           
+│   ├── requirements.yml
 │   ├── inventory/
 │   │   └── hosts.ini
 │   └── playbooks/
@@ -247,48 +257,52 @@ Alternatively, edit the `.pkr.hcl` file to match your downloaded ISO filename.
 │       ├── 03-badblood.yml
 │       ├── 04-workstation-join.yml
 │       ├── 05-sysmon.yml
-│       └── 06-crowdsec.yml
+│       ├── 06-crowdsec.yml
+│       └── 07-wazuh.yml
 │
 ├── docs/
-│   ├── config-pfSense.xml         
-│   ├── pfsense-install-guide.md  
-│   └── screenshots/               
+│   ├── config-pfSense.xml
+│   ├── soc-lab-network-topology.png
+│   ├── purple-team-notes.md
+│   ├── pentest.md
+│   └── local_rules.xml 
 │
 ├── network/
-│   ├── create-win11-vm.sh         
-│   └── vmnet-config.sh            
+│   ├── create-win11-vm.sh
+│   └── vmnet-config.sh
 │
 ├── packer/
 │   ├── pfsense/
-│   │   ├── pfsense.pkr.hcl        
-│   │   └── iso/                   
+│   │   ├── pfsense.pkr.hcl
+│   │   └── iso/
+│   ├── wazuh/
+│   │   ├── wazuh.pkr.hcl
+│   │   └── iso/
 │   ├── windows-11/
 │   │   ├── answer-files/
-│   │   │   └── autounattend.xml   
-│   │   └── iso/                   
+│   │   │   └── autounattend.xml
+│   │   └── iso/
 │   └── windows-server-2022/
-│       ├── winserver.pkr.hcl      
+│       ├── winserver.pkr.hcl
 │       ├── answer-files/
 │       │   └── autounattend.xml
-│       └── iso/                   
+│       └── iso/
 │
-├── vms/                           
-├── .env.example                   
-├── check_prereqs.sh               
-├── setup.sh                       
-└── teardown.sh                    
+├── vms/
+├── .env.example
+├── check_prereqs.sh
+├── setup.sh
+└── teardown.sh
 ```
 
 ---
-
-# Quick Start and Configuration Details
 
 ## Quick Start
 
 ### 1. Clone the repository
 
 ```bash
-git clone <repository-url>
+git clone [https://github.com/DugWheel/SOC-Lab-IaC.git](https://github.com/DugWheel/SOC-Lab-IaC.git)
 cd SOC-Lab-IaC
 ```
 
@@ -298,378 +312,146 @@ cd SOC-Lab-IaC
 cp .env.example .env
 ```
 
-Edit `.env` and configure the required credentials/settings.
+Review `.env` and adjust credentials if desired.
 
-> **Security:** `.env` contains lab credentials and must never be committed to version control. Keep `.env.example` as the safe template and use unique credentials for each deployment.
+> **Security:** `.env` holds your lab passwords and is ignored by Git. Never commit `.env` to version control.
 
-### 3. Install Ansible dependencies
+### 3. Install Ansible collections
 
 ```bash
 ansible-galaxy collection install -r ansible/requirements.yml
 ```
 
-### 4. Check prerequisites
+### 4. Verify prerequisites
 
 ```bash
 ./check_prereqs.sh
 ```
 
-### 5. Build the lab
+### 5. Deploy the lab
 
 ```bash
 ./setup.sh
 ```
 
-`setup.sh` performs the following operations in order:
-
-1. Configure VMware VMnet2 and VMnet3
-2. Create and boot the pfSense VM
-3. Pause for manual pfSense installation
-4. Build Windows Server 2022 using Packer
-5. Build Windows 11 using `create-win11-vm.sh`
-6. Start the Windows machines
-7. Execute the Ansible playbooks
-8. Promote Windows Server to a Domain Controller
-9. Populate Active Directory with BadBlood
-10. Join Windows 11 to the domain
-11. Install/configure Sysmon
-12. Install/configure CrowdSec
-
-**Estimated first-run time:** 60–90 minutes depending on hardware, network speed, and VMware performance.
-
----
-
-## pfSense Installation
-
-The pfSense installation is intentionally manual.
-
-Netgate Installer's boot flow does not provide a stable answer-file mechanism suitable for this workflow. Therefore, `setup.sh` opens the pfSense VM in a visible VMware window and waits for the installation to be completed.
-
-> **Detailed Guide:** See [`docs/pfsense-install-guide.md`](docs/pfsense-install-guide.md) for the complete step-by-step installation walkthrough.
-
-### Manual Installation Steps
-
-1. Open the VMware window launched by `setup.sh`.
-
-2. Complete the FreeBSD-based pfSense CE installation using the default installation options.
-
-3. Reboot the VM when prompted.
-
-4. Access the temporary pfSense WebGUI from the host:
-
-   ```text
-   https://172.16.1.131
-   ```
-
-5. Log in to the pfSense WebGUI.
-
-6. Navigate to:
-
-   ```text
-   Diagnostics → Backup & Restore
-   ```
-
-7. Restore:
-
-   ```text
-   docs/config-pfSense.xml
-   ```
-
-8. Wait for pfSense to reboot and apply the configuration.
-
-> **Important:** After restoring the configuration, the pfSense WebGUI IP changes.
-
-The WebGUI will become available at:
-
-```text
-https://192.168.10.1
-```
-
-9. Verify that the new configuration is active.
-10. Return to the terminal running `setup.sh`.
-11. Press **ENTER** to continue the orchestration.
+`setup.sh` executes the entire build pipeline automatically:
+1. Configures VMware host-only networks `vmnet2` (LAN) and `vmnet3` (DMZ)
+2. Builds `pfSense-fw` via Packer with `docs/config-pfSense.xml` automatically injected via ECI, detaches installer media, and boots the firewall
+3. Builds `winserver-ad` (Windows Server 2022) via Packer and attaches it to `vmnet2`
+4. Creates `win11-workstation` via `network/create-win11-vm.sh` and boots it on `vmnet2`
+5. Builds `wazuh-siem` (Ubuntu Server) via Packer with Cloud-Init, switches its adapter to `vmnet3` (DMZ `192.168.20.10`), and waits for SSH readiness
+6. Discovers the Windows hosts over WinRM and writes `ansible/inventory/hosts.ini`
+7. Runs Ansible playbooks `02` through `07` to promote the Domain Controller, run BadBlood, join Windows 11 to the domain, deploy Sysmon & CrowdSec, install the Wazuh SIEM stack, and enroll the Windows Wazuh agents[
 
 ---
 
 ## What's Actually Configured
 
-### Active Directory
+### pfSense Firewall Configuration
+After installing pfSense and assigning the initial **WAN (`em0`)** and **LAN (`em1` / `le0`)** interfaces in the console, import [`docs/config-pfSense.xml`](docs/config-pfSense.xml) via **Diagnostics -> Backup & Restore** in the WebGUI (`https://192.168.10.254`). This automatically configures all interfaces, DHCP, and firewall rules:
+* **WAN (`em0`):** NAT (`vmnet8`, DHCP)
+* **LAN (`le0`):** `192.168.10.254/24` (`vmnet2`)
+* **DMZ (`le1`):** `192.168.20.254/24` (`vmnet3`)
+* **WebGUI:** Accessible from the host at `https://192.168.10.254`
 
-The lab creates a fresh Active Directory forest:
 
-```text
-Domain: soclab.local
-Domain Controller: winserver-ad
-DC IP: 192.168.10.11
-```
 
-BadBlood populates the domain with approximately:
+### Active Directory & BadBlood
 
-* **2,500 users**
-* **500 groups**
-* **100 computers**
-
-This provides a much more realistic Active Directory attack surface than a minimal test domain.
+The lab provisions an Active Directory forest (`soclab.local`) on `winserver-ad` (`192.168.10.10`) and populates it via **BadBlood** with approximately **2,500 users**, **500 groups**, and **100 computers**, creating a realistic enterprise attack surface for BloodHound and detection engineering.
 
 ### Ansible Playbooks
 
-The post-install configuration is split into dedicated playbooks:
+| Playbook                  | Function                                                                          |
+| ------------------------- | --------------------------------------------------------------------------------- |
+| `02-ad-domain.yml`        | Promotes Windows Server to a Domain Controller and sets pfSense as DNS forwarder |
+| `03-badblood.yml`         | Populates Active Directory with synthetic objects and ACL misconfigurations |
+| `04-workstation-join.yml` | Joins Windows 11 (`win11-workstation`) to `soclab.local`                |
+| `05-sysmon.yml`           | Installs and configures Sysmon with the SwiftOnSecurity ruleset         |
+| `06-crowdsec.yml`         | Installs CrowdSec and configures Windows Security & Firewall collections |
+| `07-wazuh.yml`            | Deploys Wazuh SIEM on Ubuntu (`192.168.20.10`), installs Windows Wazuh agents, and forwards Sysmon logs |
 
-| Playbook                  | Function                                                      |
-| ------------------------- | ------------------------------------------------------------- |
-| `02-ad-domain.yml`        | Promotes Windows Server to a Domain Controller                |
-| `03-badblood.yml`         | Populates Active Directory with synthetic/adversarial objects |
-| `04-workstation-join.yml` | Joins Windows 11 to `soclab.local`                            |
-| `05-sysmon.yml`           | Installs and configures Sysmon                                |
-| `06-crowdsec.yml`         | Installs and configures CrowdSec                              |
+### Sysmon & CrowdSec
 
-### Sysmon
+* **Sysmon:** Installed on both Windows machines using the SwiftOnSecurity configuration. All `Microsoft-Windows-Sysmon/Operational` events are collected by the Wazuh agent and shipped to the Wazuh manager.
+* **CrowdSec:** Installed on both Windows machines to monitor Windows Security (`4624`, `4625`) and Firewall logs.
 
-Sysmon is deployed to both Windows hosts using a **SwiftOnSecurity-based configuration**.
+### Wazuh SIEM & Custom Detection Rules
 
-Telemetry includes:
+The Wazuh SIEM all-in-one stack (wazuh-manager, wazuh-indexer, wazuh-dashboard) is deployed on an Ubuntu Server VM isolated in the DMZ (vmnet3):
+* **Dashboard URL:** `https://192.168.20.10`
+* **Default Username:** `admin` (the generated password is displayed at the end of `07-wazuh.yml` and stored in `/root/wazuh-install-files.tar` on the Wazuh server)
+* **Custom Detection Rules:** `docs/local_rules.xml` adds high-fidelity detections for Brute Force/Password Spraying (100010–100020), LSASS Dumping (100031–100032), Impacket wmiexec user creation (100040–100042), DCSync (100050–100052), Kerberoasting & AS-REP Roasting (100060–100063), ACL Password Reset Chains (100070–100073), Shadow Credentials (100075), and Pass-the-Hash (100080).
+* **Enrolled Agents:** `WINSERVER-AD` (`192.168.10.10`) and `WIN11-WKS` (`192.168.10.11`)
 
-* Process creation
-* Network connections
-* File-system activity
-* Additional endpoint events defined by the Sysmon configuration
+### Kali Attacker VM (BYOVM)
 
-This telemetry is intended for detection engineering and SOC investigation exercises.
-
-### CrowdSec
-
-CrowdSec is installed on both Windows hosts.
-
-Configured collections include:
-
-```text
-windows
-windows-firewall
-base-http-scenarios
-http-cve
-iis
-mssql
-```
-
-The goal is to provide log-based behavioral detection and security-response experimentation inside the lab.
-
-### DMZ / Future SIEM
-
-The DMZ network:
-
-```text
-192.168.20.0/24
-```
-
-is reserved for a future SIEM deployment.
-
-The network is intentionally separated so that a centralized SIEM can be added later without redesigning the existing LAN architecture.
+Rather than forcing a fresh Kali Linux build during `./setup.sh`, the architecture supports **Bring Your Own VM (BYOVM)** for offensive testing:
+1. Open your existing Kali Linux VM settings in VMware Workstation.
+2. Set its Network Adapter to **Custom (`vmnet2` / LAN)**.
+3. Assign it the static IP `192.168.10.20/24`, gateway `192.168.10.254`, and DNS `192.168.10.10` (the Domain Controller).
 
 ---
-
-# Known Limitations and Troubleshooting
 
 ## Known Limitations
 
 ### Windows 11 Provisioning vs. Windows Server
 
-While Windows Server 2022 provisions flawlessly and reliably via Packer, Windows 11 exhibits WinRM unreliability and frequent connection timeouts during its automated sysprep phase.
-
-To bypass this limitation and guarantee a smooth build, Windows 11 is built directly via a custom bash script (`network/create-win11-vm.sh`) using `vmrun` and `autounattend.xml`.
+While Windows Server 2022, pfSense, and Ubuntu Server provision via Packer, Windows 11 exhibits WinRM timeouts during automated sysprep phases. To guarantee a smooth build, Windows 11 is created directly via `network/create-win11-vm.sh` using `vmrun` and an `autounattend.xml` answer ISO.
 
 ### BadBlood Idempotency
 
-BadBlood is designed to be idempotent, but execution is also protected by:
-
-```text
-C:\Tools\BadBlood\.badblood_done
-```
-
-Once the flag exists, the provisioning step will not run again.
-
-To intentionally repopulate the domain, remove the flag before executing the playbook again.
-
-### Centralized Secrets
-
-Credentials are centralized through `.env` and propagated to Packer and Ansible.
-
-Never commit:
-
-```text
-.env
-```
-
-to the repository.
-
-Use:
-
-```text
-.env.example
-```
-
-as the shareable configuration template.
-
-### Evaluation ISOs
-
-Windows Server 2022 and Windows 11 use evaluation media.
-
-Packer may report checksum warnings such as:
-
-```text
-ISO checksum = "none"
-```
-
-This is expected for the current evaluation-media workflow.
+BadBlood execution is guarded by `C:\BadBlood_Run.log` on the Domain Controller. Once this file exists, `03-badblood.yml` skips re-running BadBlood. Delete `C:\BadBlood_Run.log` if you want to re-run it.
 
 ---
 
-# Troubleshooting
+## Troubleshooting
 
-## VM Power-On Fails
+### VMnet Host-Only Adapter Fails
 
-Inspect the relevant VMware log:
-
-```text
-vms/<component>/vmware.log
-```
-
-## VMnet Host-Only Adapter Fails
-
-If VMnet2/VMnet3 cannot be enabled or DHCP does not start, VMware's kernel modules may not be loaded.
-
-Check:
+If `vmnet2`/`vmnet3` interfaces fail to start on Fedora, verify that VMware kernel modules are loaded:
 
 ```bash
 lsmod | grep -E "vmmon|vmnet"
 ```
 
-If the modules are missing, try rebuilding them.
-
-### Method 1 — VMware Module Repair
+If missing, rebuild them:
 
 ```bash
 sudo vmware-modconfig --console --install-all
-```
-
-Then restart VMware networking if necessary:
-
-```bash
 sudo vmware-networks --stop
 sudo vmware-networks --start
 ```
 
-### Method 2 — Community Kernel Module Patch
+### Ansible WinRM or SSH Timeouts
 
-If your Fedora kernel is newer than the VMware version officially supports, a community-maintained VMware host-module patch may be required.
-
-For example:
+Verify host reachability from Fedora:
 
 ```bash
-cd /tmp
-git clone -b workstation-25h2 https://github.com/philipl/vmware-host-modules.git
-cd vmware-host-modules
-make
-sudo make install
-sudo vmware-networks --stop
-sudo vmware-networks --start
+nc -zv 192.168.10.254 443    # pfSense WebGUI
+nc -zv 192.168.10.10 5985    # Windows Server WinRM (User: Administrator)
+nc -zv 192.168.10.11 5985    # Windows 11 WinRM (User: Admin)
+nc -zv 192.168.20.10 22      # Wazuh Ubuntu SSH
+nc -zv 192.168.20.10 1514    # Wazuh Agent events
+nc -zv 192.168.20.10 443     # Wazuh Dashboard
 ```
-
-> **Note:** Community kernel modules are dependent on the specific VMware Workstation and Linux kernel versions in use. Verify compatibility before applying them to a production system.
-
-## Ansible WinRM Timeout
-
-Verify that the Windows host is reachable over port 5985:
-
-```bash
-# For Windows Server:
-nc -zv 192.168.10.11 5985
-
-# For Windows 11:
-nc -zv 192.168.10.10 5985
-```
-
-> **Username Note:** The default administrator usernames differ between the machines. **Windows Server uses `Administrator`**, while **Windows 11 uses `Admin`**. Ensure you are using the correct user when testing WinRM credentials manually or reviewing the `ansible/inventory/hosts.ini` file.
-
-Make sure:
-
-* The IP address is correct
-* WinRM is enabled
-* The Windows host is powered on
-* The host is connected to the correct VMware network
-* Credentials in `.env` match the Ansible inventory
-
-## Packer ISO Warning
-
-Warnings similar to:
-
-```text
-ISO checksum = "none"
-```
-
-are expected when using evaluation ISOs without a configured checksum.
-
-## Windows 11 ISO Detection
-
-If the Windows 11 build cannot find the ISO, verify:
-
-```bash
-ls -lah packer/windows-11/iso/
-```
-
-There should be **exactly one** `.iso` file in the directory.
 
 ---
 
-# Teardown
+## Teardown
 
-To stop and remove the lab:
+To stop all lab VMs and clean up generated artifacts (`vms/`, Packer caches, and dynamic inventory):
 
 ```bash
 ./teardown.sh
 ```
 
-The teardown script:
-
-* Stops all lab VMs
-* Removes generated VM files under `vms/`
-* Resets the Ansible inventory
-* Optionally reverts VMware VMnet definitions
-* Optionally deletes downloaded ISOs
-
-The script asks for confirmation before destructive operations such as removing VMnet configuration or ISO files.
+The script asks for confirmation before reverting `/etc/vmware/networking` or deleting downloaded ISO files.
 
 ---
 
-# License & Credits
+## License & Credits
 
 This project is released under the **MIT License**. See [`LICENSE`](LICENSE).
 
-The project integrates several third-party technologies and projects, each of which is subject to its own license:
-
-* pfSense
-* VMware Workstation Pro
-* Microsoft Windows
-* Ansible
-* Packer
-* BadBlood
-* Sysmon
-* SwiftOnSecurity Sysmon configuration
-* CrowdSec
-
-Please review and comply with the respective licenses and terms of use for each component.
-
----
-
-# Project Goals & Roadmap
-
-The long-term vision of **SOC-Lab-IaC** is to provide a reproducible security laboratory where defenders can experiment with:
-
-* Active Directory attack detection
-* Windows endpoint telemetry
-* Sysmon event analysis
-* Log-based behavioral detection
-* Firewall and network segmentation
-* Detection engineering
-* Incident-response workflows
-* Security automation
-* Purple-team exercises
+Third-party technologies integrated into this lab (pfSense, VMware Workstation Pro, Microsoft Windows, Ubuntu, Ansible, Packer, BadBlood, Sysmon, SwiftOnSecurity Sysmon config, CrowdSec, Wazuh, Kali Linux) are governed by their respective licenses.
